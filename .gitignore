@@ -14,7 +14,7 @@ venv/
 .pytask/
 
 # Data and model artifacts
-src/renewables_forecasting/data/
+data/
 models/
 reports/
 
