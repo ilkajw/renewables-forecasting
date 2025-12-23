@@ -5,6 +5,7 @@ requires-python = ">=3.10"
 
 dependencies = [
     "pytask",
+    "requests",
 ]
 
 [tool.pytask.ini_options]
