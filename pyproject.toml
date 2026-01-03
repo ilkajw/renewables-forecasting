@@ -6,6 +6,16 @@ requires-python = ">=3.10"
 dependencies = [
     "pytask",
     "requests",
+    "xarray",
+    "pyproj",
+    "numpy",
+    "matplotlib",
+    "cfgrib",
+    "eccodes",
+    "netcdf4",
+    "scipy",
+    "dask[array]",
+    "zarr",
 ]
 
 [tool.pytask.ini_options]
