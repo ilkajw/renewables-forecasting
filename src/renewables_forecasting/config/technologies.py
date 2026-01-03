@@ -1,7 +1,9 @@
 # config/technologies.py
 from dataclasses import dataclass
-from typing import Dict
+from typing import Dict, Optional
 from pathlib import Path
+
+from renewables_forecasting.config.paths import DATA_DIR
 
 
 @dataclass(frozen=True)
@@ -15,12 +17,16 @@ class VariableConfig:
 class TechnologyConfig:
     name: str
     raw_subdir: Path
+    var_zarr_store: Optional[Path]
+    feature_zarr_store: Path
     variables: Dict[str, VariableConfig]
 
 
 SOLAR = TechnologyConfig(
     name="solar",
-    raw_subdir=Path("data/raw/dwd/solar"),
+    raw_subdir=DATA_DIR / "raw/dwd/solar",
+    var_zarr_store=DATA_DIR / "processed/dwd/solar",
+    feature_zarr_store=DATA_DIR / "features/dwd/solar",
     variables={
         "ASWDIFD_S": VariableConfig(
             name="ASWDIFD_S",
@@ -39,7 +45,9 @@ SOLAR = TechnologyConfig(
 
 WIND = TechnologyConfig(
     name="wind",
-    raw_subdir=Path("data/raw/dwd/wind"),
+    raw_subdir=DATA_DIR / "raw/dwd/wind",
+    var_zarr_store=None,
+    feature_zarr_store=DATA_DIR / "features/dwd/wind",
     variables={
         "WD_060": VariableConfig(
             name="WD_060",
