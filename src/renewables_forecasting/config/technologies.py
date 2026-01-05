@@ -49,22 +49,22 @@ WIND = TechnologyConfig(
     var_zarr_store=None,
     feature_zarr_store=DATA_DIR / "features/dwd/wind",
     variables={
-        "WD_060": VariableConfig(
-            name="WD_060",
+        "WS_060": VariableConfig(
+            name="WS_060",
             base_url="https://opendata.dwd.de/climate_environment/REA/"
-                     "COSMO_REA6/converted/hourly/2D/WD_060",
+                     "COSMO_REA6/converted/hourly/2D/WS_060",
             filename_pattern="{var}m.2D.{year}{month:02d}.nc4"),
 
-        "WD_100": VariableConfig(
-            name="WD_100",
+        "WS_100": VariableConfig(
+            name="WS_100",
             base_url="https://opendata.dwd.de/climate_environment/REA/"
-                     "COSMO_REA6/converted/hourly/2D/WD_100",
+                     "COSMO_REA6/converted/hourly/2D/WS_100",
             filename_pattern="{var}m.2D.{year}{month:02d}.nc4"),
 
-        "WD_150": VariableConfig(
-            name="WD_150",
+        "WS_125": VariableConfig(
+            name="WS_125",
             base_url="https://opendata.dwd.de/climate_environment/REA/"
-                     "COSMO_REA6/converted/hourly/2D/WD_150",
+                     "COSMO_REA6/converted/hourly/2D/WS_125",
             filename_pattern="{var}m.2D.{year}{month:02d}.nc4"),
     },
 )
