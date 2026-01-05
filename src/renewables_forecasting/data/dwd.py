@@ -165,85 +165,9 @@ def _build_area_3035_from_latlon(
         area_extent=area_extent,
     )
 
-    # Sanity checks
-    assert area.width == len(x)
-    assert area.height == len(y)
-    llx, lly, urx, ury = area.area_extent
-    print("extent:", llx, lly, urx, ury)
-    assert llx < urx
-    assert lly < ury
-
     x_da = xr.DataArray(x.astype("float64"), dims=("x",), name="x", attrs={"units": "m"})
     y_da = xr.DataArray(y.astype("float64"), dims=("y",), name="y", attrs={"units": "m"})
     return area, x_da, y_da
-
-
-def _print_resample_diagnostics(
-    *,
-    src_arr2d: np.ndarray,
-    src_lat2d: np.ndarray,
-    src_lon2d: np.ndarray,
-    res_arr2d: np.ndarray,
-    target_area,
-    x_1d: np.ndarray,
-    y_1d: np.ndarray,
-    label: str,
-):
-    print(f"\n--- DIAGNOSTICS [{label}] ---")
-
-    # What does target_area consider row0? (north or south)
-    tlons, tlats = target_area.get_lonlats()  # shape (height,width)
-    row0_lat = float(np.nanmean(tlats[0, :]))
-    rowN_lat = float(np.nanmean(tlats[-1, :]))
-    col0_lon = float(np.nanmean(tlons[:, 0]))
-    colN_lon = float(np.nanmean(tlons[:, -1]))
-
-    print(f"target_area: mean lat row0={row0_lat:.3f}, lastrow={rowN_lat:.3f}")
-    print(f"target_area: mean lon col0={col0_lon:.3f}, lastcol={colN_lon:.3f}")
-    print("target_area row0 is NORTH?" , row0_lat > rowN_lat)
-    print("target_area col0 is WEST?"  , col0_lon < colN_lon)
-
-    # What do y coords mean in lat/lon?
-    inv = Transformer.from_crs("EPSG:3035", "EPSG:4326", always_xy=True)
-    x_mid = float(x_1d[len(x_1d)//2])
-
-    y0 = float(y_1d[0])
-    yN = float(y_1d[-1])
-    _, lat_y0 = inv.transform(x_mid, y0)
-    _, lat_yN = inv.transform(x_mid, yN)
-    print(f"Coords: y[0]={y0:.0f} -> lat≈{lat_y0:.3f}, y[-1]={yN:.0f} -> lat≈{lat_yN:.3f}")
-    print("y increases NORTH?", lat_y0 < lat_yN)
-
-    # Where is the max in SOURCE (lat/lon)?
-    if np.isfinite(src_arr2d).any():
-        si = np.nanargmax(src_arr2d)
-        sy, sx = np.unravel_index(si, src_arr2d.shape)
-        smax = float(src_arr2d[sy, sx])
-        slat = float(src_lat2d[sy, sx])
-        slon = float(src_lon2d[sy, sx])
-        print(f"SOURCE max={smax:.3f} at (iy,ix)=({sy},{sx}) -> lat={slat:.3f}, lon={slon:.3f}")
-    else:
-        print("SOURCE: all NaN")
-
-    # Where is the max in RESAMPLED (lat/lon)?
-    if np.isfinite(res_arr2d).any():
-        ri = np.nanargmax(res_arr2d)
-        ry, rx = np.unravel_index(ri, res_arr2d.shape)
-        rmax = float(res_arr2d[ry, rx])
-
-        # True lat/lon of that cell according to target_area
-        rlat_true = float(tlats[ry, rx])
-        rlon_true = float(tlons[ry, rx])
-        print(f"RESAMP max={rmax:.3f} at (iy,ix)=({ry},{rx}) -> TRUE lat={rlat_true:.3f}, lon={rlon_true:.3f}")
-
-        lon_xy, lat_xy = inv.transform(float(x_1d[rx]), float(y_1d[ry]))
-        print(f"RESAMP max mapped via (x,y) -> lat≈{lat_xy:.3f}, lon≈{lon_xy:.3f}")
-    else:
-        print("RESAMP: all NaN")
-
-    # NaN fraction
-    print(f"RESAMP NaN fraction: {float(np.isnan(res_arr2d).mean()):.3f}")
-    print(f"--- END DIAGNOSTICS [{label}] ---\n")
 
 
 def _pyresample_resample_nearest_to_area(
@@ -256,7 +180,7 @@ def _pyresample_resample_nearest_to_area(
     radius_km: float,
 ) -> xr.DataArray:
 
-    # Checks
+    # Checks on dims and shape correctness
     if lat2d.ndim != 2 or lon2d.ndim != 2:
         raise ValueError("lat2d/lon2d must be 2D")
     if lat2d.shape != lon2d.shape:
@@ -271,8 +195,15 @@ def _pyresample_resample_nearest_to_area(
     da_t = da.transpose(*lead_dims, ydim, xdim)
     print(f"After transpose: da_t.dims={da_t.dims}, da_t.shape={da_t.shape}, lead_dims={lead_dims}")
 
-    src_def = geometry.SwathDefinition(lons=lon2d.values, lats=lat2d.values)
+    # Provide geographic coordinates (lat/lon) for each pixel of the source grid.
+    # Used by pyresample to build a KD-tree and find nearest source point for each target cell.
+    # Using normalized longitudes to avoid 0/360 seam issues
+    src_def = geometry.SwathDefinition(
+        lons=_normalize_lon_180(lon2d.values),
+        lats=lat2d.values,
+    )
 
+    # Wrapper for kd_tree resampling of a 2D array
     def _resample_2d(arr2d: np.ndarray) -> np.ndarray:
         return kd_tree.resample_nearest(
             src_def,
@@ -282,41 +213,18 @@ def _pyresample_resample_nearest_to_area(
             fill_value=np.nan,
         )
 
+    # Extract data as numpy array
     data = da_t.values
 
+    # 2D case: data along lat, lon
     if data.ndim == 2:
         print("Case: 2D (no time)")
         res = _resample_2d(data)
 
-        _print_resample_diagnostics(
-            src_arr2d=data,
-            src_lat2d=lat2d.values,
-            src_lon2d=lon2d.values,
-            res_arr2d=res,
-            target_area=target_area,
-            x_1d=x.values,
-            y_1d=y.values,
-            label="BEFORE_FLIP",
-        )
-
         # Flip y (north<->south) due to pyresample interpreting y=0 at the top
         res = res[::-1, :]
 
-        _print_resample_diagnostics(
-            src_arr2d=data,
-            src_lat2d=lat2d.values,
-            src_lon2d=lon2d.values,
-            res_arr2d=res,
-            target_area=target_area,
-            x_1d=x.values,
-            y_1d=y.values,
-            label="AFTER_FLIP",
-        )
-
-        # Sanity checks
-        assert res.shape == (len(y), len(x))
-        assert res.shape == (target_area.height, target_area.width)
-
+        # Obtain resampled data as DataArray
         out = xr.DataArray(
             res,
             dims=("y", "x"),
@@ -327,38 +235,18 @@ def _pyresample_resample_nearest_to_area(
 
         return out
 
+    # 3D case: data along time, lat, lon
     if data.ndim == 3 and lead_dims == ["time"]:
         print("Case: 3D (time, Y, X)")
-        res0 = _resample_2d(data[0, :, :])
 
-        _print_resample_diagnostics(
-            src_arr2d=data[0, :, :],
-            src_lat2d=lat2d.values,
-            src_lon2d=lon2d.values,
-            res_arr2d=res0,
-            target_area=target_area,
-            x_1d=x.values,
-            y_1d=y.values,
-            label="T0_BEFORE_FLIP",
-        )
-
+        # Resample per time step
         res = np.stack([_resample_2d(data[i, :, :]) for i in range(data.shape[0])], axis=0)
         print(f"Stacked res.shape={res.shape} (time,height,width)")
 
         # Flip y (north<->south) due to pyresample interpreting y=0 at the top
         res = res[:, ::-1, :]
 
-        _print_resample_diagnostics(
-            src_arr2d=data[0, :, :],
-            src_lat2d=lat2d.values,
-            src_lon2d=lon2d.values,
-            res_arr2d=res[0, :, :],
-            target_area=target_area,
-            x_1d=x.values,
-            y_1d=y.values,
-            label="T0_AFTER_FLIP",
-        )
-
+        # Obtain resampled data as DataArray
         out = xr.DataArray(
             res,
             dims=("time", "y", "x"),
@@ -382,18 +270,22 @@ def preprocess_solar_data(
     grid_resolution_km: float = 30.0,
 ) -> None:
 
-    # Build target area (x/y) from a reference solar file (lat/lon source)
+    # Build target area (indexed x/y) from a reference solar file (lat/lon source)
+
+    # Obtain reference solar ds (on lat/lon grid)
     ref_var = list(tech.variables.keys())[0]
     ref_dir = tech.raw_subdir / ref_var
     ref_file = next(p for p in ref_dir.iterdir() if p.is_file() and p.name.endswith(".grb.bz2"))
     ref_ds = _open_dataset(ref_file)
 
+    # Build rectangular, regular target grid in EPSG:3035 with square cells fitting the original data grid
     target_area, x, y = _build_area_3035_from_latlon(
         lat2d=ref_ds["latitude"],
         lon2d=ref_ds["longitude"],
         resolution_km=grid_resolution_km,
     )
 
+    # Radius considered in search for nearest source cell
     radius_km = grid_resolution_km * 3.0
 
     # Loop over variables and their monthly files to regrid data
@@ -404,6 +296,7 @@ def preprocess_solar_data(
         for file_path in sorted(var_dir.iterdir()):
             if not file_path.is_file():
                 continue
+
             # Ignore already decompressed files and .idx artefacts
             if file_path.name.endswith((".grb", ".idx")):
                 continue
@@ -411,7 +304,7 @@ def preprocess_solar_data(
             # Obtain data for var and month
             ds = _open_dataset(file_path)
 
-            # Regrid data to target grid
+            # Regrid data from curvilinear source to regular target grid
             out = _pyresample_resample_nearest_to_area(
                 da=ds[var],
                 lat2d=ds["latitude"],
@@ -443,7 +336,7 @@ def preprocess_wind_data(
     grid_resolution_km: float = 30.0,
 ) -> None:
 
-    # Build target area (x/y) from a reference wind file (RLAT/RLON source)
+    # Obtain reference wind file (RLAT/RLON source) to build the target grid
     ref_var = list(tech.variables.keys())[0]
     ref_dir = tech.raw_subdir / ref_var
     ref_file = next(p for p in ref_dir.iterdir() if p.is_file())
@@ -452,13 +345,14 @@ def preprocess_wind_data(
     if "RLAT" not in ref_ds or "RLON" not in ref_ds:
         raise ValueError("Wind dataset has no RLAT/RLON coordinates")
 
+    # Build rectangular, regular target grid in EPSG:3035 with square cells fitting the original data grid
     target_area, x, y = _build_area_3035_from_latlon(
         lat2d=ref_ds["RLAT"],
         lon2d=ref_ds["RLON"],
         resolution_km=grid_resolution_km,
     )
 
-    # Radius used to search for neighbours in regridding
+    # Radius used to search for nearest source cell in resampling
     radius_km = grid_resolution_km * 3.0
 
     # Loop over variables and their monthly files to regrid data
@@ -473,7 +367,7 @@ def preprocess_wind_data(
             # Load data for var and month
             ds = _open_dataset(file_path)
 
-            # Regrid data to the target grid
+            # Regrid to the target grid
             out = _pyresample_resample_nearest_to_area(
                 da=ds["wind_speed"],
                 lat2d=ds["RLAT"],
@@ -484,7 +378,7 @@ def preprocess_wind_data(
                 radius_km=radius_km,
             )
 
-            # Transform to xarray dataset
+            # Obtain data as xarray dataset
             out_ds = xr.Dataset({var: out}).chunk({"time": 24})
 
             # Attach CRS grid type and resolution info
@@ -518,7 +412,6 @@ def build_solar_features(vars_path: Path, store_path: Path) -> None:
         units="W m-2",
     )
 
-    # Target is projected: x/y coords (no latitude/longitude)
     coords = {"time": ghi["time"], "y": ghi["y"], "x": ghi["x"]}
 
     xr.Dataset(

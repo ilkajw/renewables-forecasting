@@ -41,7 +41,7 @@ def task_download_dwd(
     (WIND.raw_subdir / ".complete").touch()
 
 
-# Build regridded solar variable zarr
+# Build zarr with solar variables on target grid
 
 def task_build_solar_var_grids(
     depends_on=SOLAR.raw_subdir / ".complete",
@@ -60,7 +60,7 @@ def task_build_solar_var_grids(
     (SOLAR.var_zarr_store / ".complete").touch()
 
 
-# Build solar feature grids (GHI)
+# Build solar feature grids (GHI) on target grid
 
 def task_build_solar_feature_grids(
     depends_on=SOLAR.var_zarr_store / ".complete",
