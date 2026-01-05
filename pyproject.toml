@@ -16,6 +16,7 @@ dependencies = [
     "scipy",
     "dask[array]",
     "zarr",
+    "pyresample",
 ]
 
 [tool.pytask.ini_options]

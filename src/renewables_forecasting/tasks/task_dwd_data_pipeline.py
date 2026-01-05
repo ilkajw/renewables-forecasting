@@ -21,7 +21,7 @@ def task_download_dwd(
     SOLAR.raw_subdir.mkdir(parents=True, exist_ok=True)
     WIND.raw_subdir.mkdir(parents=True, exist_ok=True)
 
-    # Download (example range)
+    # Download
     download_cosmo_rea6(
         variables=SOLAR.variables,
         start=date(2017, 2, 1),
@@ -36,7 +36,7 @@ def task_download_dwd(
         output_dir=WIND.raw_subdir,
     )
 
-    # Sentinel files
+    # Sentinel files as directories cannot be tracked
     (SOLAR.raw_subdir / ".complete").touch()
     (WIND.raw_subdir / ".complete").touch()
 
