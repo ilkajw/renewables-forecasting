@@ -71,7 +71,7 @@ def plot_grid_heatmap(
     plt.figure(figsize=figsize)
 
     to3035 = Transformer.from_crs("EPSG:4326", "EPSG:3035", always_xy=True)
-    x0, y0 = to3035.transform(13.4050, 52.5200)  # Berlin lon/lat
+    x0, y0 = to3035.transform(10.4515, 51.1657)  # lon/lat center of Germany
 
     da_rel = da.assign_coords(
         x=(da.x - x0) / 1000,
@@ -79,8 +79,8 @@ def plot_grid_heatmap(
     )
 
     m = da_rel.plot.pcolormesh(x="x", y="y", cmap=cmap, robust=True)
-    m.axes.set_xlabel("x (km from Berlin)")
-    m.axes.set_ylabel("y (km from Berlin)")
+    m.axes.set_xlabel("x (km from center of Germany)")
+    m.axes.set_ylabel("y (km from center of Germany)")
 
     ax = m.axes
     ax.ticklabel_format(style="plain", axis="both", useOffset=False)
