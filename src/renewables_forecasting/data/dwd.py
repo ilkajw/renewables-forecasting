@@ -70,8 +70,8 @@ def download_cosmo_rea6(
     end: date,
     output_dir: Path,
 ):
-    # Working with months only.
-    # No unambiguity by enforcing use of first of month
+    # Raw data is summarized to monthly files.
+    # No ambiguity by enforcing use of first of month
     assert start.day == 1
     assert end.day == 1
 
@@ -111,39 +111,50 @@ def _normalize_lon_180(lon):
     return ((lon + 180) % 360) - 180
 
 
-def _build_area_3035_from_latlon(
+def _build_3035_target_grid_from_4326_source_grid(
     lat2d: xr.DataArray,
     lon2d: xr.DataArray,
     resolution_km: float = 30.0,
 ) -> Tuple[geometry.AreaDefinition, xr.DataArray, xr.DataArray]:
-    """
-    Build a rectangular, regular target grid in EPSG:3035 with square cells.
 
-    Returns:
-      - pyresample AreaDefinition (target)
-      - x centers (meters) as 1D DataArray
-      - y centers (meters) as 1D DataArray
-
-    Note:
-      - No lat/lon target coordinates are created or stored.
-      - Only x/y in meters define the grid.
-    """
     dx = float(resolution_km) * 1000.0
 
-    # Project source lat/lon to EPSG:3035 meters to get bounds
+    # Project EPSG:4326 lat/lon source grid to EPSG:3035 meters grid
+
+    # EPSG:3035 is area-preserving (target grid cells are equal in size),
+    # and not generally equidistant.
+    # Equidistance between target grid cell centers is achieved through
+    # target grid construction below.
+
+    # x_ij, y_ij being EPSG:3035 grid coords, lat_ij, lon_ij being source grid coords:
+    # Build Transformer which calculates projection P such that:
+    # (x_ij, y_ij) = P(lon_ij, lat_ij)
+
+    # Initialise transformer
     to_3035 = Transformer.from_crs(crs_from="EPSG:4326", crs_to="EPSG:3035", always_xy=True)
+
+    # Apply projection, obtaining:
+    # todo: are they really centers? affects bounding box calculatioN!
+    # x_m: 2D array of cell center x-coords: each COSMO REA6 source grid cell x-coord projected to EPSG:3035
+    # y_m: 2D array of cell center y-coords: each COSMO REA6 source grid cell y-coord projected to EPSG:3035
+    # in meters from EPSG:3035 origin
+    # todo: what is the origin?
     x_m, y_m = to_3035.transform(_normalize_lon_180(lon2d).values, lat2d.values)
 
+    # Get bounds of EPSG:3035 grid
     xmin = np.nanmin(x_m)
     xmax = np.nanmax(x_m)
     ymin = np.nanmin(y_m)
     ymax = np.nanmax(y_m)
 
-    # Define target cell centers on a regular meter grid
+    # Construct target grid from EPSG:3035 projection bounds
+    # with dx=dy=30 km spacing
+    # -> achieves equidistance between cell centers
     x = np.arange(xmin, xmax + dx, dx)
     y = np.arange(ymin, ymax + dx, dx)
 
-    # AreaDefinition expects area extent as edges (llx, lly, urx, ury)
+    # Calculate outer grid edges
+    # as AreaDefinition expects this info for area_extent
     area_extent = (
         float(x[0] - dx / 2),
         float(y[0] - dx / 2),
@@ -154,17 +165,21 @@ def _build_area_3035_from_latlon(
     # Create a pyproj CRS reference object representing the EPSG:3035 system
     crs_3035 = CRS.from_epsg(3035)
 
-    # Define grid as AreaDefinition regular raster object
+    # Define EPSG:3035 target grid with target spacing as an AreaDefinition object
     area = geometry.AreaDefinition(
         area_id="target_3035",
         description=f"EPSG:3035 regular grid {resolution_km:.1f}km",
         proj_id="epsg3035",
+        # Target geometry (regular, in meters, area preserving)
         projection=crs_3035.to_dict(),
+        # Info on target grid: bounds and number of coords
+        # with dx, dx spacing implicitly determined
         width=len(x),
         height=len(y),
         area_extent=area_extent,
     )
 
+    # Target grid x, y cell center coords as xr.DataArrays
     x_da = xr.DataArray(x.astype("float64"), dims=("x",), name="x", attrs={"units": "m"})
     y_da = xr.DataArray(y.astype("float64"), dims=("y",), name="y", attrs={"units": "m"})
     return area, x_da, y_da
@@ -190,13 +205,13 @@ def _pyresample_resample_nearest_to_area(
     if ydim not in da.dims or xdim not in da.dims:
         raise ValueError(f"da dims {da.dims} do not include spatial dims {(ydim, xdim)}")
 
-    # Move spatial dims last
+    # Enforce that da is ordered (ydim, xdim) or (time, ydim, xdim) for correct slicing later
     lead_dims = [d for d in da.dims if d not in (ydim, xdim)]
     da_t = da.transpose(*lead_dims, ydim, xdim)
     print(f"After transpose: da_t.dims={da_t.dims}, da_t.shape={da_t.shape}, lead_dims={lead_dims}")
 
-    # Provide geographic coordinates (lat/lon) for each pixel of the source grid.
-    # Used by pyresample to build a KD-tree and find nearest source point for each target cell.
+    # Construct a grid with lon/lat info per cell from lon/lat arrays of the source grid.
+    # Used by pyresample to build a KD-tree and find nearest source point for each target point.
     # Using normalized longitudes to avoid 0/360 seam issues
     src_def = geometry.SwathDefinition(
         lons=_normalize_lon_180(lon2d.values),
@@ -219,9 +234,11 @@ def _pyresample_resample_nearest_to_area(
     # 2D case: data along lat, lon
     if data.ndim == 2:
         print("Case: 2D (no time)")
+
+        # Apply resampling obtaining target grid filled with resampled data
         res = _resample_2d(data)
 
-        # Flip y (north<->south) due to pyresample interpreting y=0 at the top
+        # Flip y (north<->south) due to pyresample interpreting y=0 as upmost row
         res = res[::-1, :]
 
         # Obtain resampled data as DataArray
@@ -239,11 +256,11 @@ def _pyresample_resample_nearest_to_area(
     if data.ndim == 3 and lead_dims == ["time"]:
         print("Case: 3D (time, Y, X)")
 
-        # Resample per time step
+        # Apply resampling obtaining target grid filled with resampled data per time step
         res = np.stack([_resample_2d(data[i, :, :]) for i in range(data.shape[0])], axis=0)
         print(f"Stacked res.shape={res.shape} (time,height,width)")
 
-        # Flip y (north<->south) due to pyresample interpreting y=0 at the top
+        # Flip y (north<->south) due to pyresample interpreting y=0 as upper row
         res = res[:, ::-1, :]
 
         # Obtain resampled data as DataArray
@@ -270,16 +287,14 @@ def preprocess_solar_data(
     grid_resolution_km: float = 30.0,
 ) -> None:
 
-    # Build target area (indexed x/y) from a reference solar file (lat/lon source)
-
-    # Obtain reference solar ds (on lat/lon grid)
+    # Open reference solar ds to obtain source grid
     ref_var = list(tech.variables.keys())[0]
     ref_dir = tech.raw_subdir / ref_var
     ref_file = next(p for p in ref_dir.iterdir() if p.is_file() and p.name.endswith(".grb.bz2"))
     ref_ds = _open_dataset(ref_file)
 
-    # Build rectangular, regular target grid in EPSG:3035 with square cells fitting the original data grid
-    target_area, x, y = _build_area_3035_from_latlon(
+    # Project source grid to regular, area-preserving target grid in EPSG:3035
+    target_area, x, y = _build_3035_target_grid_from_4326_source_grid(
         lat2d=ref_ds["latitude"],
         lon2d=ref_ds["longitude"],
         resolution_km=grid_resolution_km,
@@ -304,7 +319,7 @@ def preprocess_solar_data(
             # Obtain data for var and month
             ds = _open_dataset(file_path)
 
-            # Regrid data from curvilinear source to regular target grid
+            # Fill target grid with resampled data
             out = _pyresample_resample_nearest_to_area(
                 da=ds[var],
                 lat2d=ds["latitude"],
@@ -315,7 +330,7 @@ def preprocess_solar_data(
                 radius_km=radius_km,
             )
 
-            # Obtain data as an xarray Dataset
+            # Obtain resampled data as xarray Dataset
             out_ds = xr.Dataset({var: out}).chunk({"time": 24})
 
             # Attach CRS grid type and resolution info
@@ -336,7 +351,7 @@ def preprocess_wind_data(
     grid_resolution_km: float = 30.0,
 ) -> None:
 
-    # Obtain reference wind file (RLAT/RLON source) to build the target grid
+    # Open reference wind file to obtain source grid
     ref_var = list(tech.variables.keys())[0]
     ref_dir = tech.raw_subdir / ref_var
     ref_file = next(p for p in ref_dir.iterdir() if p.is_file())
@@ -345,8 +360,8 @@ def preprocess_wind_data(
     if "RLAT" not in ref_ds or "RLON" not in ref_ds:
         raise ValueError("Wind dataset has no RLAT/RLON coordinates")
 
-    # Build rectangular, regular target grid in EPSG:3035 with square cells fitting the original data grid
-    target_area, x, y = _build_area_3035_from_latlon(
+    # Project EPSG:4326 lon/lat source grid to EPSG:3035 area-preserving target grid in meters
+    target_area, x, y = _build_3035_target_grid_from_4326_source_grid(
         lat2d=ref_ds["RLAT"],
         lon2d=ref_ds["RLON"],
         resolution_km=grid_resolution_km,
@@ -367,7 +382,7 @@ def preprocess_wind_data(
             # Load data for var and month
             ds = _open_dataset(file_path)
 
-            # Regrid to the target grid
+            # Fill target grid with resampled data
             out = _pyresample_resample_nearest_to_area(
                 da=ds["wind_speed"],
                 lat2d=ds["RLAT"],
@@ -378,7 +393,7 @@ def preprocess_wind_data(
                 radius_km=radius_km,
             )
 
-            # Obtain data as xarray dataset
+            # Obtain resampled data as xarray dataset
             out_ds = xr.Dataset({var: out}).chunk({"time": 24})
 
             # Attach CRS grid type and resolution info
@@ -398,6 +413,7 @@ def preprocess_wind_data(
 # -----------------------------------------------------------------------------
 
 def build_solar_features(vars_path: Path, store_path: Path) -> None:
+
     ds_dir = vars_path
     ds_dif = xr.open_zarr(ds_dir, group="ASWDIFD_S")
     ds_dirr = xr.open_zarr(ds_dir, group="ASWDIR_S")
@@ -406,14 +422,17 @@ def build_solar_features(vars_path: Path, store_path: Path) -> None:
     ghi = ds_dif["ASWDIFD_S"] + ds_dirr["ASWDIR_S"]
     ghi = ghi.drop_vars("valid_time", errors="ignore")
 
+    # Descriptive attrs
     ghi = ghi.assign_attrs(
         standard_name="surface_downwelling_shortwave_flux",
         long_name="Global Horizontal Irradiance",
         units="W m-2",
     )
 
+    # Define ghi dataset coords
     coords = {"time": ghi["time"], "y": ghi["y"], "x": ghi["x"]}
 
+    # Write to disk as zarr
     xr.Dataset(
         {"GHI": ghi},
         coords=coords,
