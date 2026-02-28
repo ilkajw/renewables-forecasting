@@ -134,7 +134,7 @@ def _build_3035_target_grid_from_4326_source_grid(
     to_3035 = Transformer.from_crs(crs_from="EPSG:4326", crs_to="EPSG:3035", always_xy=True)
 
     # Apply projection, obtaining:
-    # todo: are they really centers? affects bounding box calculatioN!
+    # todo: are they really centers? affects bounding box calculation
     # x_m: 2D array of cell center x-coords: each COSMO REA6 source grid cell x-coord projected to EPSG:3035
     # y_m: 2D array of cell center y-coords: each COSMO REA6 source grid cell y-coord projected to EPSG:3035
     # in meters from EPSG:3035 origin
@@ -162,7 +162,7 @@ def _build_3035_target_grid_from_4326_source_grid(
         float(y[-1] + dx / 2),
     )
 
-    # Create a pyproj CRS reference object representing the EPSG:3035 system
+    # Create a pyproj coordinate reference system object representing the EPSG:3035 system
     crs_3035 = CRS.from_epsg(3035)
 
     # Define EPSG:3035 target grid with target spacing as an AreaDefinition object

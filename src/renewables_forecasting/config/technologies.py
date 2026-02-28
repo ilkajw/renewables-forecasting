@@ -1,9 +1,9 @@
 # config/technologies.py
 from dataclasses import dataclass
-from typing import Dict, Optional
+from typing import Dict, Optional, List
 from pathlib import Path
 
-from renewables_forecasting.config.paths import DATA_DIR
+from renewables_forecasting.config.paths import RAW_DATA_DIR, DATA_DIR
 
 
 @dataclass(frozen=True)
@@ -19,15 +19,24 @@ class TechnologyConfig:
     raw_subdir: Path
     var_zarr_store: Optional[Path]
     feature_zarr_store: Path
-    variables: Dict[str, VariableConfig]
+    weather_variables: Dict[str, VariableConfig]
+    plant_variables: List[str]
+    plant_data_raw_subdir: Path
+
+# todo:
+#  fix subdir definitions and naming: rename raw subdir to raw weather subdir,
+#  define subdir for raw mastr solar/wind data.
+#  move paths and source definitions to paths.py and data_sources.py.
+#  check usage of restructured definitions
 
 
 SOLAR = TechnologyConfig(
     name="solar",
     raw_subdir=DATA_DIR / "raw/dwd/solar",
+    plant_data_raw_subdir=RAW_DATA_DIR / "mastr/solar",
     var_zarr_store=DATA_DIR / "processed/dwd/solar",
     feature_zarr_store=DATA_DIR / "features/dwd/solar",
-    variables={
+    weather_variables={
         "ASWDIFD_S": VariableConfig(
             name="ASWDIFD_S",
             base_url="https://opendata.dwd.de/"
@@ -40,6 +49,11 @@ SOLAR = TechnologyConfig(
             "climate_environment/REA/COSMO_REA6/hourly/2D/ASWDIR_S",
             filename_pattern="{var}.2D.{year}{month:02d}.grb.bz2"),
     },
+    plant_variables=["NameStromerzeugungseinheit", "EinheitMastrNummer", "Bundesland", "Landkreis", "Gemeinde",
+                     "Gemeindeschluessel", "Postleitzahl", "Strasse", "Ort", "Laengengrad", "Breitengrad",
+                     "Inbetriebnahmedatum", "DatumEndgueltigeStilllegung", "DatumBeginnVoruebergehendeStilllegung",
+                     "DatumWiederaufnahmeBetrieb", "EinheitBetriebsstatus", "Bruttoleistung", "Nettonennleistung",
+                     "Einspeisungsart", "Leistungsbegrenzung", "InbetriebnahmedatumAmAktuellenStandort"]
 )
 
 
@@ -48,7 +62,7 @@ WIND = TechnologyConfig(
     raw_subdir=DATA_DIR / "raw/dwd/wind",
     var_zarr_store=None,
     feature_zarr_store=DATA_DIR / "features/dwd/wind",
-    variables={
+    weather_variables={
         "WS_060": VariableConfig(
             name="WS_060",
             base_url="https://opendata.dwd.de/climate_environment/REA/"
@@ -67,4 +81,7 @@ WIND = TechnologyConfig(
                      "COSMO_REA6/converted/hourly/2D/WS_125",
             filename_pattern="{var}m.2D.{year}{month:02d}.nc4"),
     },
+    plant_variables=[],
+    plant_data_raw_subdir=RAW_DATA_DIR / "mastr" / "wind"
+
 )

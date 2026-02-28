@@ -17,6 +17,8 @@ dependencies = [
     "dask[array]",
     "zarr",
     "pyresample",
+    "pandas",
+    "sqlite3",
 ]
 
 [tool.pytask.ini_options]
