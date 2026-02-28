@@ -23,14 +23,14 @@ def task_download_dwd(
 
     # Download
     download_cosmo_rea6(
-        variables=SOLAR.variables,
+        variables=SOLAR.weather_variables,
         start=date(2017, 2, 1),
         end=date(2017, 2, 1),
         output_dir=SOLAR.raw_subdir,
     )
 
     download_cosmo_rea6(
-        variables=WIND.variables,
+        variables=WIND.weather_variables,
         start=date(2017, 2, 1),
         end=date(2017, 2, 1),
         output_dir=WIND.raw_subdir,
