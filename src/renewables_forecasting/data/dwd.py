@@ -9,7 +9,7 @@ from datetime import date
 from typing import Dict, Tuple
 from pyproj import Transformer, CRS
 
-from renewables_forecasting.config.technologies import TechnologyConfig, VariableConfig
+from renewables_forecasting.config.technologies import TechnologyConfig, WeatherVariableSource
 
 
 # -----------------------------------------------------------------------------
@@ -65,7 +65,7 @@ def _goto_next_month(current: date):
 # -----------------------------------------------------------------------------
 
 def download_cosmo_rea6(
-    variables: Dict[str, VariableConfig],
+    variables: Dict[str, WeatherVariableSource],
     start: date,
     end: date,
     output_dir: Path,
@@ -288,7 +288,7 @@ def preprocess_solar_data(
 ) -> None:
 
     # Open reference solar ds to obtain source grid
-    ref_var = list(tech.variables.keys())[0]
+    ref_var = list(tech.weather_variables.keys())[0]
     ref_dir = tech.raw_subdir / ref_var
     ref_file = next(p for p in ref_dir.iterdir() if p.is_file() and p.name.endswith(".grb.bz2"))
     ref_ds = _open_dataset(ref_file)
@@ -304,7 +304,7 @@ def preprocess_solar_data(
     radius_km = grid_resolution_km * 3.0
 
     # Loop over variables and their monthly files to regrid data
-    for var in tech.variables:
+    for var in tech.weather_variables:
         first_write = True
         var_dir = tech.raw_subdir / var
 
@@ -352,7 +352,7 @@ def preprocess_wind_data(
 ) -> None:
 
     # Open reference wind file to obtain source grid
-    ref_var = list(tech.variables.keys())[0]
+    ref_var = list(tech.weather_variables.keys())[0]
     ref_dir = tech.raw_subdir / ref_var
     ref_file = next(p for p in ref_dir.iterdir() if p.is_file())
     ref_ds = _open_dataset(ref_file)
@@ -371,7 +371,7 @@ def preprocess_wind_data(
     radius_km = grid_resolution_km * 3.0
 
     # Loop over variables and their monthly files to regrid data
-    for var in tech.variables:
+    for var in tech.weather_variables:
         first_write = True
         var_dir = tech.raw_subdir / var
 

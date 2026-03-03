@@ -17,12 +17,10 @@ def filename_from_url(url: str) -> str:
 
 
 def download_mastr_gesamtdatenuebersicht(
-        url, target_dir: Path, overwrite=False, connect_timeout=30, read_timeout=600
+        url: str, out_path: Path, overwrite: bool = False, connect_timeout: int = 30, read_timeout: int = 600
 ) -> Path:
 
-    target_dir.mkdir(parents=True, exist_ok=True)
-    fname = filename_from_url(url)
-    out_path = target_dir / fname
+    out_path.parent.mkdir(parents=True, exist_ok=True)
 
     # Overwrite behaviour
     if out_path.exists() and not overwrite:
@@ -76,6 +74,48 @@ def filter_solar_xml_from_gesamtdatenuebersicht_to_csv(
 
                     # Filter for EinheitSolar elements, leaving out any meta data
                     if elem.tag.endswith("EinheitSolar"):
+
+                        # Get Inbetriebnahmedatum to filter for plants of interest
+                        d = elem.findtext("Inbetriebnahmedatum")
+                        d = date.fromisoformat(d) if d else None  # Get python date type
+
+                        # Extract variables for solar units of interest
+                        if d is None or (inbetriebnahme_start <= d <= inbetriebnahme_end):
+                            fields = [elem.findtext(var) or "" for var in variables]
+
+                            # Write unit data to csv file
+                            w.writerow(fields)
+
+                        elem.clear()  # Free memory
+
+
+def filter_wind_xml_from_gesamtdatenuebersicht_to_csv(
+        zip_path: Path,
+        inbetriebnahme_start: date,
+        inbetriebnahme_end: date,
+        variables: List[str],
+        out_csv: Path = Path("einheiten_wind.csv")
+) -> None:
+
+    out_csv.parent.mkdir(parents=True, exist_ok=True)
+
+    # Open zip to read solar xml from. Open solar xml and output file
+    with zipfile.ZipFile(zip_path) as zf, open(out_csv, "w", newline="", encoding="utf-8") as out:
+
+        # Prep out_csv file
+        w = csv.writer(out)
+        w.writerow(variables)
+
+        # Collect all files with naming 'EinheitenWind_x.xml', x=[1, 49] from zip
+        wind_xmls = [n for n in zf.namelist() if "EinheitenWind" in n]
+
+        # iterparse stopping after every full element, loop through xml tree elements with index (event, elem)
+        for f in wind_xmls:
+            with zf.open(f) as curr_xml:
+                for _, elem in ET.iterparse(curr_xml, events=("end",)):
+
+                    # Filter for EinheitSolar elements, leaving out any meta data
+                    if elem.tag.endswith("EinheitWind"):
 
                         # Get Inbetriebnahmedatum to filter for plants of interest
                         d = elem.findtext("Inbetriebnahmedatum")

@@ -6,7 +6,7 @@ import time, sys
 from datetime import datetime
 from pathlib import Path
 
-from renewables_forecasting.config.data_sources import SMARD_SOLAR_GEN_TIMESTAMPS_URL
+from renewables_forecasting.config.data_sources import SMARD_SOLAR_GENERATION_TIMESTAMPS_URL
 
 
 def check_template(template: str, required_keys: list):
@@ -16,7 +16,7 @@ def check_template(template: str, required_keys: list):
 
 def resolve_smard_timestamps(start: datetime, end: datetime):
 
-    response = requests.get(url=SMARD_SOLAR_GEN_TIMESTAMPS_URL)
+    response = requests.get(url=SMARD_SOLAR_GENERATION_TIMESTAMPS_URL)
     response.raise_for_status()
     timestamps_dict = response.json()
     timestamps_all = timestamps_dict["timestamps"]
@@ -38,7 +38,7 @@ def download_smard_solar_gen(
 ):
 
     check_template(url_template, ["timestamp"])  # Check for expected template string key word
-    check_template(str(out_path_template), ["start", "end"])  # out_path_template is Path from joining with pathin paths.py
+    check_template(str(out_path_template), ["start", "end"])  # out_path_template is Path as defined in paths.py
 
     out_path = Path(str(out_path_template).format(start=start.strftime("%Y%m%d"), end=end.strftime("%Y%m%d")))
 
