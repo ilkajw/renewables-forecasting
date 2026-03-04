@@ -47,11 +47,14 @@ def download_mastr_gesamtdatenuebersicht(
     return out_path
 
 
-def filter_solar_xml_from_gesamtdatenuebersicht_to_csv(
+def filter_xmls_from_gesamtdatenuebersicht_to_csv(
         zip_path: Path,
-        inbetriebnahme_start: date,
-        inbetriebnahme_end: date,
+        naming_files: str,
+        naming_units: str,
+        start: date,
+        end: date,
         variables: List[str],
+        exclude_filters: dict[str, str] | None = None,
         out_csv: Path = Path("einheiten_solar.csv")
 ) -> None:
 
@@ -64,23 +67,46 @@ def filter_solar_xml_from_gesamtdatenuebersicht_to_csv(
         w = csv.writer(out)
         w.writerow(variables)
 
-        # Collect all files with naming 'EinheitenSolar_x.xml', x=[1, 49] from zip
-        solar_xmls = [n for n in zf.namelist() if "EinheitenSolar" in n]
+        # Collect all xmls with naming 'EinheitenSolar_x.xml' or 'EinheitenWind_x.xml', x=[1, 49] from zip
+        xmls = [n for n in zf.namelist() if naming_files in n]
 
-        # iterparse stopping after every full element, loop through xml tree elements with index (event, elem)
-        for f in solar_xmls:
+        for f in xmls:
             with zf.open(f) as curr_xml:
+
+                # iterparse stopping after every full element, loop through xml tree elements with index (event, elem)
                 for _, elem in ET.iterparse(curr_xml, events=("end",)):
 
-                    # Filter for EinheitSolar elements, leaving out any meta data
-                    if elem.tag.endswith("EinheitSolar"):
+                    # Filter for EinheitSolar or EinheitWind elements, leaving out any meta data
+                    if elem.tag.endswith(naming_units):
 
-                        # Get Inbetriebnahmedatum to filter for plants of interest
-                        d = elem.findtext("Inbetriebnahmedatum")
-                        d = date.fromisoformat(d) if d else None  # Get python date type
+                        # Get dates to derive periods online and offline
+                        inbetriebnahme_d = elem.findtext("Inbetriebnahmedatum")
+                        endg_stilllegung_d = elem.findtext("DatumEndgueltigeStilllegung")
+                        vorr_stilllegung_d = elem.findtext("DatumBeginnVoruebergehendeStilllegung")
+                        wiederaufnahme_d = elem.findtext("DatumWiederaufnahmeBetrieb")
 
-                        # Extract variables for solar units of interest
-                        if d is None or (inbetriebnahme_start <= d <= inbetriebnahme_end):
+                        # Get python date types
+                        inbetriebnahme_d = date.fromisoformat(inbetriebnahme_d) if inbetriebnahme_d else None
+                        endg_stilllegung_d = date.fromisoformat(endg_stilllegung_d) if endg_stilllegung_d else None
+                        vorr_stilllegung_d = date.fromisoformat(vorr_stilllegung_d) if vorr_stilllegung_d else None
+                        wiederaufnahme_d = date.fromisoformat(wiederaufnahme_d) if wiederaufnahme_d else None
+
+                        not_decomm_before_start = endg_stilllegung_d is None or start <= endg_stilllegung_d
+                        comm_before_end = inbetriebnahme_d is None or inbetriebnahme_d <= end
+                        only_temp_off = (
+                            vorr_stilllegung_d is None  # never temporarily off
+                            or start < vorr_stilllegung_d  # went off during period
+                            or wiederaufnahme_d <= end  # came back on before end
+                        )
+
+                        # Extract variables for solar units online during period:
+                        if not_decomm_before_start and comm_before_end and only_temp_off:
+
+                            # Skip unit if any exclude-filter applies
+                            if exclude_filters and any(elem.findtext(k) == v for k, v in exclude_filters.items()):
+                                elem.clear()  # Free memory
+                                continue
+
                             fields = [elem.findtext(var) or "" for var in variables]
 
                             # Write unit data to csv file

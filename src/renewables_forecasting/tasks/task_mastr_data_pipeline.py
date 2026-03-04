@@ -2,14 +2,13 @@ from datetime import date
 
 from renewables_forecasting.config.paths import MASTR_GESAMTDATENUEBERSICHT_PATH, MASTR_SOLAR_PLANTS_CSV_PATH, \
     MASTR_SOLAR_PLANTS_SQLITE_PATH, MASTR_WIND_PLANTS_CSV_PATH, MASTR_WIND_PLANTS_SQLITE_PATH
-from renewables_forecasting.config.data_sources import MASTR_ZIP_URL
-from renewables_forecasting.config.technologies import SOLAR, WIND
+from renewables_forecasting.config.data_sources import MASTR_ZIP_URL, MASTR_SOLAR_VARIABLES
+
 from renewables_forecasting.data.mastr import download_mastr_gesamtdatenuebersicht, \
-    filter_solar_xml_from_gesamtdatenuebersicht_to_csv, csv_to_sql
+    filter_xmls_from_gesamtdatenuebersicht_to_csv, csv_to_sql
 
 
 def task_download_mastr_gesamtdatenuebersicht(produces=MASTR_GESAMTDATENUEBERSICHT_PATH):
-
     # Pytask automatically creates parent directories of files in 'produces'
 
     download_mastr_gesamtdatenuebersicht(
@@ -19,21 +18,26 @@ def task_download_mastr_gesamtdatenuebersicht(produces=MASTR_GESAMTDATENUEBERSIC
     )
 
 
-def task_filter_solar_xml_to_csv(depends_on=MASTR_GESAMTDATENUEBERSICHT_PATH, produces=MASTR_SOLAR_PLANTS_CSV_PATH):
+def filter_solar_xmls_from_gesamtdatenuebersicht_to_csv(
+        depends_on=MASTR_GESAMTDATENUEBERSICHT_PATH,
+        produces=MASTR_SOLAR_PLANTS_CSV_PATH
+):
 
-    # Pytask automatically creates parent directories of files in 'produces'
-
-    filter_solar_xml_from_gesamtdatenuebersicht_to_csv(
+    filter_xmls_from_gesamtdatenuebersicht_to_csv(
         zip_path=MASTR_GESAMTDATENUEBERSICHT_PATH,
-        inbetriebnahme_start=date(2015, 1, 1),
-        inbetriebnahme_end=date(2025, 12, 31),
-        variables=SOLAR.plant_variables,
+        naming_files="EinheitenSolar",
+        naming_units="EinheitSolar",
+        start=date(2015, 1, 1),
+        end=date(2025, 12, 31),  # inclusive
+        variables=MASTR_SOLAR_VARIABLES,
+        exclude_filters={
+            "EinheitBetriebstatus": "31"  # filter out plants still 'InPlanung'
+        },
         out_csv=MASTR_SOLAR_PLANTS_CSV_PATH
     )
 
 
 def task_solar_csv_to_sqlite(depends_on=MASTR_SOLAR_PLANTS_CSV_PATH, produces=MASTR_SOLAR_PLANTS_SQLITE_PATH):
-
     csv_to_sql(
         csv_path=MASTR_SOLAR_PLANTS_CSV_PATH,
         sql_path=MASTR_SOLAR_PLANTS_SQLITE_PATH
@@ -43,13 +47,17 @@ def task_solar_csv_to_sqlite(depends_on=MASTR_SOLAR_PLANTS_CSV_PATH, produces=MA
 """
 def task_filter_wind_xml_to_csv(depends_on=MASTR_GESAMTDATENUEBERSICHT_PATH, produces=MASTR_WIND_PLANTS_CSV_PATH):
 
-    # Pytask automatically creates parent directories of files in 'produces'
 
-    filter_wind_xml_from_gesamtdatenuebersicht_to_csv(
+    filter_xmls_from_gesamtdatenuebersicht_to_csv(
         zip_path=MASTR_GESAMTDATENUEBERSICHT_PATH,
-        inbetriebnahme_start=date(2015, 1, 1),
-        inbetriebnahme_end=date(2025, 12, 31, 23, 59),
-        variables=WIND.plant_variables,
+        naming_files="EinheitenWind",
+        naming_units="EinheitWind",
+        start=date(2015, 1, 1),
+        end=date(2025, 12, 31),  # inclusive
+        variables=MASTR_WIND_VARIABLES,
+        exclude_filters={
+            "EinheitBetriebstatus": "31"  # filter out plants still 'InPlanung'
+        },
         out_csv=MASTR_WIND_PLANTS_CSV_PATH
     )
 
