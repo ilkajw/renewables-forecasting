@@ -96,7 +96,7 @@ def filter_xmls_from_gesamtdatenuebersicht_to_csv(
                         only_temp_off = (
                             vorr_stilllegung_d is None  # never temporarily off
                             or start < vorr_stilllegung_d  # went off during period
-                            or wiederaufnahme_d <= end  # came back on before end
+                            or (wiederaufnahme_d is not None and wiederaufnahme_d <= end)  # came back on before end
                         )
 
                         # Extract variables for solar units online during period:
