@@ -19,6 +19,7 @@ dependencies = [
     "pyresample",
     "pandas",
     "sqlite3",
+    "cdsapi"
 ]
 
 [tool.pytask.ini_options]

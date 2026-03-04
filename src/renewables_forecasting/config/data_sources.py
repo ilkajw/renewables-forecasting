@@ -1,5 +1,22 @@
 from dataclasses import dataclass
 
+# ---- ERA5 weather data ----
+
+ERA5_SOLAR_VARIABLES = {
+    "ssrd": "surface_solar_radiation_downwards",
+    #"strd": "surface_thermal_radiation_downwards",
+    #"t2m": "2m_temperature",
+    #"skt": "skin_temperature",
+}
+
+
+ERA5_WIND_VARIABLES = {
+    "u100": "100m_u_component_of_wind",
+    "v100": "100m_v_component_of_wind",
+    "t2m": "2m_temperature",
+    "tp": "total_precipitation",
+}
+
 
 # ---- DWD weather data sources ----
 
@@ -38,6 +55,13 @@ DWD_COSMO_REA6_WIND = {
         base_url="https://opendata.dwd.de/climate_environment/REA/COSMO_REA6/converted/hourly/2D/WS_125",
         filename_pattern="{var}m.2D.{year}{month:02d}.nc4"),
 }
+
+
+# Geonames postal code data for Germany
+
+GEONAMES_POSTAL_CODES_URL = "https://download.geonames.org/export/zip/DE.zip"
+
+
 
 # ---- MaStR plant data sources ----
 

@@ -7,9 +7,12 @@ RAW_DATA_DIR = DATA_DIR / "raw"
 PROCESSED_DATA_DIR = DATA_DIR / "processed"
 FEATURES_DATA_DIR = DATA_DIR / "features"
 
+# --- ERA5 dara ----
+ERA5_DATA_DIR = RAW_DATA_DIR / "era5"
+ERA5_SOLAR_DATA_DIR = ERA5_DATA_DIR / "solar"
+
 
 # ---- DWD weather data ----
-
 DWD_DATA_DIR_RAW = RAW_DATA_DIR / "dwd"
 DWD_DATA_DIR_PROCESSED = PROCESSED_DATA_DIR / "dwd"
 DWD_DATA_DIR_FEATURES = FEATURES_DATA_DIR / "dwd"
@@ -22,6 +25,10 @@ DWD_SOLAR_DATA_DIR_FEATURES = DWD_DATA_DIR_FEATURES / "solar"
 # Wind
 DWD_WIND_DATA_DIR_RAW = DWD_DATA_DIR_RAW / "wind"
 DWD_WIND_DATA_DIR_FEATURES = DWD_DATA_DIR_FEATURES / "wind"
+
+# Regrid
+TARGET_GRID_ZARR_STORE = PROCESSED_DATA_DIR / "target_grid"
+TARGET_GRID_REF_DS_STORE = DWD_SOLAR_DATA_DIR_RAW / "ASWDIR_S/ASWDIR_S.2D.201702.grb"
 
 
 # ---- MaStR plant data ----
@@ -36,6 +43,8 @@ MASTR_SOLAR_PLANTS_SQLITE_PATH = MASTR_DATA_DIR_RAW / "solar/einheiten_solar_202
 MASTR_WIND_PLANTS_CSV_PATH = MASTR_DATA_DIR_RAW / "wind/einheiten_wind_20260101_25.2.csv"
 MASTR_WIND_PLANTS_SQLITE_PATH = MASTR_DATA_DIR_RAW / "wind/einheiten_wind_20260101_25.2.db"
 
+# Geonames postal code data
+GEONAMES_POSTAL_CODE_DATA = RAW_DATA_DIR / "geonames/geonames_postal_code_data_DE.zip"
 
 # ---- SMARD generation data ----
 
