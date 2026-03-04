@@ -10,6 +10,8 @@ from typing import Dict, Tuple
 from pyproj import Transformer, CRS
 
 from renewables_forecasting.config.technologies import TechnologyConfig, WeatherVariableSource
+from renewables_forecasting.config.paths import DWD_SOLAR_DATA_DIR_RAW, DWD_WIND_DATA_DIR_RAW
+from renewables_forecasting.config.grid import LAT_MIN, LAT_MAX, LON_MIN, LON_MAX
 
 
 # -----------------------------------------------------------------------------
@@ -48,6 +50,27 @@ def _open_dataset(path: Path) -> xr.Dataset:
     # For wind files being NetCDF
     else:
         return xr.open_dataset(path)
+
+
+def _save_regrid_data_to_zarr(
+    da: xr.DataArray,
+    store_path: Path,
+    first_write: bool,
+    grid_resolution_m,
+    var: str
+):
+    # Obtain resampled data as xarray dataset
+    out_ds = xr.Dataset({var: da}).chunk({"time": 24})
+
+    # Attach CRS grid type and resolution info
+    out_ds.attrs["crs"] = "EPSG:3035"
+    out_ds.attrs["grid_resolution_m"] = float(grid_resolution_m)
+
+    # Write to disk
+    if first_write:
+        out_ds.to_zarr(store_path, group=var, mode="w")
+    else:
+        out_ds.to_zarr(store_path, group=var, mode="a", append_dim="time")
 
 
 def _goto_next_month(current: date):
@@ -111,78 +134,133 @@ def _normalize_lon_180(lon):
     return ((lon + 180) % 360) - 180
 
 
+def _slice_germany_from_epsg_4326_grid(lat2d: xr.DataArray, lon2d: xr.DataArray):
+    mask = (lat2d >= LAT_MIN) & (lat2d <= LAT_MAX) & (lon2d >= LON_MIN) & (lon2d <= LON_MAX)
+    lat2d_germany = lat2d.where(mask)
+    lon2d_germany = lon2d.where(mask)
+
+    return lat2d_germany, lon2d_germany
+
+
 def _build_3035_target_grid_from_4326_source_grid(
     lat2d: xr.DataArray,
     lon2d: xr.DataArray,
-    resolution_km: float = 30.0,
-) -> Tuple[geometry.AreaDefinition, xr.DataArray, xr.DataArray]:
+    cell_size_m: float = 30000.0,
+) -> Tuple[xr.DataArray, xr.DataArray]:
 
-    dx = float(resolution_km) * 1000.0
+    # Project the lat-, lon-coordinates of cell centers of a EPSG:4326 curvilinear source grid
+    # to the EPSG:3035 coord ref system, obtaining cell center x-, y-coords being meters north- and eastward
+    # from the EPSG:3035 origin for every source grid cell
 
-    # Project EPSG:4326 lat/lon source grid to EPSG:3035 meters grid
+    # EPSG:3035 is an equal-area projection (equal areas in meter space correspond to equal areas on earth's surface),
+    # but does not guarantee equidistance of points. Equidistance between target grid cell centers is achieved through
+    # target grid construction below
 
-    # EPSG:3035 is area-preserving (target grid cells are equal in size),
-    # and not generally equidistant.
-    # Equidistance between target grid cell centers is achieved through
-    # target grid construction below.
-
-    # x_ij, y_ij being EPSG:3035 grid coords, lat_ij, lon_ij being source grid coords:
+    # (x_ij, y_ij) being meters from EPSG:3035 origin,
+    # lat_ij, lon_ij being EPSG:4326 (source grid) coords in degrees:
     # Build Transformer which calculates projection P such that:
     # (x_ij, y_ij) = P(lon_ij, lat_ij)
 
-    # Initialise transformer
     to_3035 = Transformer.from_crs(crs_from="EPSG:4326", crs_to="EPSG:3035", always_xy=True)
 
     # Apply projection, obtaining:
-    # todo: are they really centers? affects bounding box calculation
-    # x_m: 2D array of cell center x-coords: each COSMO REA6 source grid cell x-coord projected to EPSG:3035
-    # y_m: 2D array of cell center y-coords: each COSMO REA6 source grid cell y-coord projected to EPSG:3035
-    # in meters from EPSG:3035 origin
-    # todo: what is the origin?
+    # x_m: 2D array of x-coords of the curvilinear grid cell centers in meters eastward from 3035 origin
+    # y_m: 2D array of y-coords of the curvilinear grid cell centers in meters northward from 3035 origin
     x_m, y_m = to_3035.transform(_normalize_lon_180(lon2d).values, lat2d.values)
 
-    # Get bounds of EPSG:3035 grid
+    # Get bounds
     xmin = np.nanmin(x_m)
     xmax = np.nanmax(x_m)
     ymin = np.nanmin(y_m)
     ymax = np.nanmax(y_m)
 
-    # Construct target grid from EPSG:3035 projection bounds
-    # with dx=dy=30 km spacing
-    # -> achieves equidistance between cell centers
-    x = np.arange(xmin, xmax + dx, dx)
-    y = np.arange(ymin, ymax + dx, dx)
+    # Construct equidistant target grid between bounds with desired spacing
+    x = np.arange(xmin, xmax + cell_size_m, cell_size_m)  # todo: use linspace instead of arange?
+    y = np.arange(ymin, ymax + cell_size_m, cell_size_m)
 
-    # Calculate outer grid edges
-    # as AreaDefinition expects this info for area_extent
+    # Save target grid (cell center x-, y-coords) as xr.DataArrays
+    x_da = xr.DataArray(x.astype("float64"), dims=("x",), name="x", attrs={"units": "m"})
+    y_da = xr.DataArray(y.astype("float64"), dims=("y",), name="y", attrs={"units": "m"})
+    return x_da, y_da
+
+
+def _build_and_save_epsg_3035_germany_target_grid(
+    ref_ds: Path,
+    store_path: Path,
+    cell_size_m: float = 30000.0
+) -> None:
+
+    assert 1000 <= cell_size_m <= 100_000, (
+        f"cell_size_m={cell_size_m} looks wrong - expected between 1km and 100km"
+    )
+
+    # Reference ds to retrieve cosmo lat-lon map
+    ds = _open_dataset(ref_ds)
+    lat2d = ds["latitude"]  # assumes solar ds
+    lon2d = ds["longitude"]
+
+    # Slice out Germany from map
+    lat2d_germany, lon2d_germany = _slice_germany_from_epsg_4326_grid(lat2d, lon2d)
+
+    # Project EPSG:4326 coord arrays over Germany to EPSG:3035 coord arrays
+    x, y = _build_3035_target_grid_from_4326_source_grid(
+        lat2d=lat2d_germany,
+        lon2d=lon2d_germany,
+        cell_size_m=cell_size_m,
+    )
+
+    # Save EPSG:3035 target map for later weather and plant capacity utilisation
+    xr.Dataset(
+        coords={"x": x, "y": y},
+        attrs={
+            "crs": "EPSG:3035",
+            "grid_resolution_m": float(cell_size_m),
+        },
+    ).to_zarr(store_path, mode="w")
+
+
+def load_target_grid(store_path: Path):
+
+    ds = xr.open_zarr(store_path)
+    x = ds['x']
+    y = ds['y']
+
+    return x, y
+
+
+def _get_epsg_3035_area_obj(
+        x: xr.DataArray,
+        y: xr.DataArray,
+        grid_resolution_m: float = 30000.0
+):
+
+    # Calculate outer grid edges (AreaDefinition expects this as area_extent)
     area_extent = (
-        float(x[0] - dx / 2),
-        float(y[0] - dx / 2),
-        float(x[-1] + dx / 2),
-        float(y[-1] + dx / 2),
+        float(x[0] - grid_resolution_m / 2),
+        float(y[0] - grid_resolution_m / 2),
+        float(x[-1] + grid_resolution_m / 2),
+        float(y[-1] + grid_resolution_m / 2),
     )
 
     # Create a pyproj coordinate reference system object representing the EPSG:3035 system
     crs_3035 = CRS.from_epsg(3035)
 
-    # Define EPSG:3035 target grid with target spacing as an AreaDefinition object
+    # Define target grid as an AreaDefinition object with desired cell size
+    # and coordinates of bounds and cells derived from EPSG:3035
     area = geometry.AreaDefinition(
         area_id="target_3035",
-        description=f"EPSG:3035 regular grid {resolution_km:.1f}km",
+        description=f"EPSG:3035 regular grid {grid_resolution_m:.1f}m",
         proj_id="epsg3035",
-        # Target geometry (regular, in meters, area preserving)
+        # Target geometry (in meters, area preserving)
         projection=crs_3035.to_dict(),
-        # Info on target grid: bounds and number of coords
-        # with dx, dx spacing implicitly determined
+        # Target grid info: bound coordinates and number of coords. grid_resolution spacing is implicitly determined
+        # -> width, height, area_extent determine regularity
         width=len(x),
         height=len(y),
         area_extent=area_extent,
     )
 
-    # Target grid x, y cell center coords as xr.DataArrays
-    x_da = xr.DataArray(x.astype("float64"), dims=("x",), name="x", attrs={"units": "m"})
-    y_da = xr.DataArray(y.astype("float64"), dims=("y",), name="y", attrs={"units": "m"})
-    return area, x_da, y_da
+    return area
 
 
 def _pyresample_resample_nearest_to_area(
@@ -192,8 +270,11 @@ def _pyresample_resample_nearest_to_area(
     target_area: geometry.AreaDefinition,
     x: xr.DataArray,
     y: xr.DataArray,
-    radius_km: float,
+    radius_of_influence_m: float,
 ) -> xr.DataArray:
+
+    # Fill the regular meter-measured target grid with data resampled via nearest-neighbor resampling from the
+    # curvilinear source grid
 
     # Checks on dims and shape correctness
     if lat2d.ndim != 2 or lon2d.ndim != 2:
@@ -205,16 +286,15 @@ def _pyresample_resample_nearest_to_area(
     if ydim not in da.dims or xdim not in da.dims:
         raise ValueError(f"da dims {da.dims} do not include spatial dims {(ydim, xdim)}")
 
-    # Enforce that da is ordered (ydim, xdim) or (time, ydim, xdim) for correct slicing later
+    # Enforce that da is ordered (ydim, xdim) or (time, ydim, xdim) for correct slicing
     lead_dims = [d for d in da.dims if d not in (ydim, xdim)]
     da_t = da.transpose(*lead_dims, ydim, xdim)
     print(f"After transpose: da_t.dims={da_t.dims}, da_t.shape={da_t.shape}, lead_dims={lead_dims}")
 
-    # Construct a grid with lon/lat info per cell from lon/lat arrays of the source grid.
-    # Used by pyresample to build a KD-tree and find nearest source point for each target point.
-    # Using normalized longitudes to avoid 0/360 seam issues
+    # Construct swath with lat-lon coords per cell from  lon-lat coord arrays of source grid.
+    # Used by pyresample to build a KD-tree and find nearest source point for each target grid cell.
     src_def = geometry.SwathDefinition(
-        lons=_normalize_lon_180(lon2d.values),
+        lons=_normalize_lon_180(lon2d.values),  # normalized longitudes to avoid 0/360 seam issues
         lats=lat2d.values,
     )
 
@@ -224,43 +304,21 @@ def _pyresample_resample_nearest_to_area(
             src_def,
             arr2d,
             target_area,
-            radius_of_influence=float(radius_km) * 1000.0,
+            radius_of_influence=float(radius_of_influence_m),
             fill_value=np.nan,
         )
 
     # Extract data as numpy array
     data = da_t.values
 
-    # 2D case: data along lat, lon
-    if data.ndim == 2:
-        print("Case: 2D (no time)")
-
-        # Apply resampling obtaining target grid filled with resampled data
-        res = _resample_2d(data)
-
-        # Flip y (north<->south) due to pyresample interpreting y=0 as upmost row
-        res = res[::-1, :]
-
-        # Obtain resampled data as DataArray
-        out = xr.DataArray(
-            res,
-            dims=("y", "x"),
-            coords={"y": y, "x": x},
-            name=da.name,
-            attrs=da.attrs,
-        )
-
-        return out
-
-    # 3D case: data along time, lat, lon
     if data.ndim == 3 and lead_dims == ["time"]:
-        print("Case: 3D (time, Y, X)")
 
         # Apply resampling obtaining target grid filled with resampled data per time step
         res = np.stack([_resample_2d(data[i, :, :]) for i in range(data.shape[0])], axis=0)
         print(f"Stacked res.shape={res.shape} (time,height,width)")
 
-        # Flip y (north<->south) due to pyresample interpreting y=0 as upper row
+        # pyresample returns row 0 = north (top of area_extent).
+        # Flip so row 0 = south, matching ascending y coordinate array
         res = res[:, ::-1, :]
 
         # Obtain resampled data as DataArray
@@ -274,39 +332,31 @@ def _pyresample_resample_nearest_to_area(
 
         return out
 
-    raise ValueError(f"Unsupported dims for resampling: da.dims={da.dims}, lead_dims={lead_dims}")
+    raise ValueError(f"Unsupported dims for resampling: da.dims={da.dims}, lead_dims={lead_dims}. 3 dim needed.")
 
 
 # -----------------------------------------------------------------------------
-# Preprocessors
+# Regrid weather data to regular meter grid
 # -----------------------------------------------------------------------------
 
-def preprocess_solar_data(
+def regrid_cosmo_rea6_solar(
     tech: TechnologyConfig,
-    zarr_store: Path,
-    grid_resolution_km: float = 30.0,
+    data_zarr_store: Path,
+    target_grid_zarr_store: Path,
+    grid_resolution_m: float = 30000.0,
 ) -> None:
 
-    # Open reference solar ds to obtain source grid
-    ref_var = list(tech.weather_variables.keys())[0]
-    ref_dir = tech.raw_subdir / ref_var
-    ref_file = next(p for p in ref_dir.iterdir() if p.is_file() and p.name.endswith(".grb.bz2"))
-    ref_ds = _open_dataset(ref_file)
-
-    # Project source grid to regular, area-preserving target grid in EPSG:3035
-    target_area, x, y = _build_3035_target_grid_from_4326_source_grid(
-        lat2d=ref_ds["latitude"],
-        lon2d=ref_ds["longitude"],
-        resolution_km=grid_resolution_km,
-    )
+    # Load target grid
+    x, y = load_target_grid(target_grid_zarr_store)
+    area = _get_epsg_3035_area_obj(x, y, grid_resolution_m)
 
     # Radius considered in search for nearest source cell
-    radius_km = grid_resolution_km * 3.0
+    radius_of_influence_m = grid_resolution_m * 1.0
 
-    # Loop over variables and their monthly files to regrid data
+    # Loop over variables and their monthly files to regrid all solar data
     for var in tech.weather_variables:
         first_write = True
-        var_dir = tech.raw_subdir / var
+        var_dir = DWD_SOLAR_DATA_DIR_RAW / var
 
         for file_path in sorted(var_dir.iterdir()):
             if not file_path.is_file():
@@ -324,58 +374,45 @@ def preprocess_solar_data(
                 da=ds[var],
                 lat2d=ds["latitude"],
                 lon2d=ds["longitude"],
-                target_area=target_area,
+                target_area=area,
                 x=x,
                 y=y,
-                radius_km=radius_km,
+                radius_of_influence_m=radius_of_influence_m,
             )
 
-            # Obtain resampled data as xarray Dataset
-            out_ds = xr.Dataset({var: out}).chunk({"time": 24})
+            _save_regrid_data_to_zarr(
+                da=out,
+                store_path=data_zarr_store,
+                var=var,
+                first_write=first_write,
+                grid_resolution_m=grid_resolution_m,
+            )
 
-            # Attach CRS grid type and resolution info
-            out_ds.attrs["crs"] = "EPSG:3035"
-            out_ds.attrs["grid_resolution_m"] = float(grid_resolution_km) * 1000.0
-
-            # Write to disk
-            if first_write:
-                out_ds.to_zarr(zarr_store, group=var, mode="w")
-                first_write = False
-            else:
-                out_ds.to_zarr(zarr_store, group=var, mode="a", append_dim="time")
+            first_write = False
 
 
-def preprocess_wind_data(
+def regrid_cosmo_rea6_wind(
     tech: TechnologyConfig,
-    zarr_store: Path,
-    grid_resolution_km: float = 30.0,
+    data_zarr_store: Path,
+    target_grid_zarr_store: Path,
+    grid_resolution_m: float = 30000.0,
 ) -> None:
 
-    # Open reference wind file to obtain source grid
-    ref_var = list(tech.weather_variables.keys())[0]
-    ref_dir = tech.raw_subdir / ref_var
-    ref_file = next(p for p in ref_dir.iterdir() if p.is_file())
-    ref_ds = _open_dataset(ref_file)
+    # Get target grid
+    x, y = load_target_grid(target_grid_zarr_store)
+    area = _get_epsg_3035_area_obj(x, y, grid_resolution_m)
 
-    if "RLAT" not in ref_ds or "RLON" not in ref_ds:
-        raise ValueError("Wind dataset has no RLAT/RLON coordinates")
+    # Radius used to search for nearest source cell in resampling. Adjust multiplier accordingly
+    radius_of_influence_m = grid_resolution_m * 1.0
 
-    # Project EPSG:4326 lon/lat source grid to EPSG:3035 area-preserving target grid in meters
-    target_area, x, y = _build_3035_target_grid_from_4326_source_grid(
-        lat2d=ref_ds["RLAT"],
-        lon2d=ref_ds["RLON"],
-        resolution_km=grid_resolution_km,
-    )
-
-    # Radius used to search for nearest source cell in resampling
-    radius_km = grid_resolution_km * 3.0
-
-    # Loop over variables and their monthly files to regrid data
+    # Loop over variables and their monthly files to regrid all wind data
     for var in tech.weather_variables:
         first_write = True
-        var_dir = tech.raw_subdir / var
+        var_dir = DWD_WIND_DATA_DIR_RAW / var
 
         for file_path in sorted(var_dir.iterdir()):
+
+            # Ignore any dirs
             if not file_path.is_file():
                 continue
 
@@ -384,35 +421,31 @@ def preprocess_wind_data(
 
             # Fill target grid with resampled data
             out = _pyresample_resample_nearest_to_area(
-                da=ds["wind_speed"],
+                da=ds["wind_speed"],  # for any of our variables, data is under 'wind_speed'
                 lat2d=ds["RLAT"],
                 lon2d=ds["RLON"],
-                target_area=target_area,
+                target_area=area,
                 x=x,
                 y=y,
-                radius_km=radius_km,
+                radius_of_influence_m=radius_of_influence_m,
             )
 
-            # Obtain resampled data as xarray dataset
-            out_ds = xr.Dataset({var: out}).chunk({"time": 24})
+            _save_regrid_data_to_zarr(
+                da=out,
+                store_path=data_zarr_store,
+                var=var,
+                first_write=first_write,
+                grid_resolution_m=grid_resolution_m,
+            )
 
-            # Attach CRS grid type and resolution info
-            out_ds.attrs["crs"] = "EPSG:3035"
-            out_ds.attrs["grid_resolution_m"] = float(grid_resolution_km) * 1000.0
-
-            # Write to disk
-            if first_write:
-                out_ds.to_zarr(zarr_store, group=var, mode="w")
-                first_write = False
-            else:
-                out_ds.to_zarr(zarr_store, group=var, mode="a", append_dim="time")
+            first_write = False
 
 
 # -----------------------------------------------------------------------------
 # Solar features
 # -----------------------------------------------------------------------------
 
-def build_solar_features(vars_path: Path, store_path: Path) -> None:
+def build_solar_feature_grid(vars_path: Path, store_path: Path) -> None:
 
     ds_dir = vars_path
     ds_dif = xr.open_zarr(ds_dir, group="ASWDIFD_S")
