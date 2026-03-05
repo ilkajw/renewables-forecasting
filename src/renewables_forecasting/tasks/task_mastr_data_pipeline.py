@@ -18,7 +18,7 @@ def task_download_mastr_gesamtdatenuebersicht(produces=MASTR_GESAMTDATENUEBERSIC
     )
 
 
-def filter_solar_xmls_from_gesamtdatenuebersicht_to_csv(
+def task_filter_solar_xmls_from_gesamtdatenuebersicht_to_csv(
         depends_on=MASTR_GESAMTDATENUEBERSICHT_PATH,
         produces=MASTR_SOLAR_PLANTS_CSV_PATH
 ):
@@ -31,7 +31,7 @@ def filter_solar_xmls_from_gesamtdatenuebersicht_to_csv(
         end=date(2025, 12, 31),  # inclusive
         variables=MASTR_SOLAR_VARIABLES,
         exclude_filters={
-            "EinheitBetriebstatus": "31"  # filter out plants still 'InPlanung'
+            "EinheitBetriebsstatus": "31"  # filter out plants still 'InPlanung'
         },
         out_csv=MASTR_SOLAR_PLANTS_CSV_PATH
     )
