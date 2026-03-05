@@ -103,6 +103,7 @@ def filter_xmls_from_gesamtdatenuebersicht_to_csv(
                         if not_decomm_before_start and comm_before_end and only_temp_off:
 
                             # Skip unit if any exclude-filter applies
+                            # todo: this did nt work for Betriebsstatus
                             if exclude_filters and any(elem.findtext(k) == v for k, v in exclude_filters.items()):
                                 elem.clear()  # Free memory
                                 continue
