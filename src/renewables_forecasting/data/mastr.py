@@ -79,6 +79,11 @@ def filter_xmls_from_gesamtdatenuebersicht_to_csv(
                     # Filter for EinheitSolar or EinheitWind elements, leaving out any meta data
                     if elem.tag.endswith(naming_units):
 
+                        # Leave out foreign plants with postal codes of length 4 and 6
+                        plz = elem.findtext("Postleitzahl")
+                        if len(plz) != 5:
+                            continue
+
                         # Get dates to derive periods online and offline
                         inbetriebnahme_d = elem.findtext("Inbetriebnahmedatum")
                         endg_stilllegung_d = elem.findtext("DatumEndgueltigeStilllegung")
@@ -103,7 +108,6 @@ def filter_xmls_from_gesamtdatenuebersicht_to_csv(
                         if not_decomm_before_start and comm_before_end and only_temp_off:
 
                             # Skip unit if any exclude-filter applies
-                            # todo: this did nt work for Betriebsstatus
                             if exclude_filters and any(elem.findtext(k) == v for k, v in exclude_filters.items()):
                                 elem.clear()  # Free memory
                                 continue
@@ -164,6 +168,5 @@ def csv_to_sql(csv_path: Path, sql_path: Path, overwrite: bool = True):
         sql_path.unlink(missing_ok=True)  # Delete db
 
     with sqlite3.connect(sql_path) as conn:
-        for chunk in pd.read_csv(csv_path, chunksize=100_000):
+        for chunk in pd.read_csv(csv_path, chunksize=100_000, dtype={'Postleitzahl': str}):
             chunk.to_sql("einheiten_solar", conn, if_exists='append', index=False)
-
