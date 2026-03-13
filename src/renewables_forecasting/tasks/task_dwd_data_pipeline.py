@@ -10,9 +10,9 @@ from renewables_forecasting.data.dwd import (
 
 from renewables_forecasting.config.paths import DWD_SOLAR_DATA_DIR_RAW, DWD_SOLAR_DATA_DIR_PROCESSED, \
     DWD_SOLAR_DATA_DIR_FEATURES, DWD_WIND_DATA_DIR_RAW, DWD_WIND_DATA_DIR_FEATURES, TARGET_GRID_ZARR_STORE, \
-    TARGET_GRID_REF_DS_STORE
+    GRID_REFERENCE_DS_STORE
 from renewables_forecasting.config.technologies import SOLAR, WIND
-from renewables_forecasting.config.grid import GRID_RESOLUTION_M, LON_MAX, LON_MIN, LAT_MIN, LAT_MAX
+from renewables_forecasting.config.data_constants import GRID_RESOLUTION_M
 
 
 # ---- Download raw DWD data ----
@@ -43,12 +43,12 @@ def task_download_dwd_wind(produces=DWD_WIND_DATA_DIR_RAW / ".complete"):
 
 
 def task_build_and_save_target_grid(
-        depends_on=TARGET_GRID_REF_DS_STORE,
+        depends_on=GRID_REFERENCE_DS_STORE,
         produces=TARGET_GRID_ZARR_STORE / ".complete"
 ):
 
     _build_and_save_epsg_3035_germany_target_grid(
-        ref_ds=TARGET_GRID_REF_DS_STORE,
+        ref_ds=GRID_REFERENCE_DS_STORE,
         store_path=TARGET_GRID_ZARR_STORE,
         cell_size_m=GRID_RESOLUTION_M
     )

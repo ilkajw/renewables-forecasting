@@ -1,4 +1,5 @@
 from pathlib import Path
+from renewables_forecasting.config.data_sources import MASTR_GESAMTDATENUEBERSICHT_VERSION
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -7,12 +8,62 @@ RAW_DATA_DIR = DATA_DIR / "raw"
 PROCESSED_DATA_DIR = DATA_DIR / "processed"
 FEATURES_DATA_DIR = DATA_DIR / "features"
 
-# --- ERA5 dara ----
-ERA5_DATA_DIR = RAW_DATA_DIR / "era5"
-ERA5_SOLAR_DATA_DIR = ERA5_DATA_DIR / "solar"
+# --- Copernicus ERA5 ----
+ERA5_RAW_DATA_DIR = RAW_DATA_DIR / "era5"
+ERA5_RAW_SOLAR_DATA_DIR = ERA5_RAW_DATA_DIR / "solar"
+
+# For viz
+ERA5_EUROPE_DIR = ERA5_RAW_DATA_DIR / "europe"
+ERA5_EUROPE_SOLAR_DATA_DIR = ERA5_EUROPE_DIR / "solar"
+ERA5_EUROPE_WIND_DATA_DIR = ERA5_EUROPE_DIR / "wind"
 
 
-# ---- DWD weather data ----
+# ---- Markstammdatenregister (MaStR) ----
+
+MASTR_DATA_DIR_RAW = RAW_DATA_DIR / "mastr"
+MASTR_DATA_DIR_PROCESSED = PROCESSED_DATA_DIR / "mastr"
+
+MASTR_GESAMTDATENUEBERSICHT_PATH = MASTR_DATA_DIR_RAW / f"Gesamtdatenexport_{MASTR_GESAMTDATENUEBERSICHT_VERSION}.zip"
+
+# Filtered solar plants data
+MASTR_SOLAR_PLANTS_FILTERED_CSV \
+    = MASTR_DATA_DIR_PROCESSED / f"solar/einheiten_solar_{MASTR_GESAMTDATENUEBERSICHT_VERSION}.csv"
+MASTR_SOLAR_PLANTS_FILTERED_SQLITE \
+    = MASTR_DATA_DIR_PROCESSED / f"solar/einheiten_solar_{MASTR_GESAMTDATENUEBERSICHT_VERSION}.db"
+
+# Filtered solar plants data with added coords
+MASTR_SOLAR_PLANTS_FILTERED_WITH_COORDS_CSV \
+    = MASTR_DATA_DIR_PROCESSED / f"solar/einheiten_solar_{MASTR_GESAMTDATENUEBERSICHT_VERSION}_with_coords.csv"
+MASTR_SOLAR_PLANTS_FILTERED_WITH_COORDS_SQLITE \
+    = MASTR_DATA_DIR_PROCESSED / f"solar/einheiten_solar_{MASTR_GESAMTDATENUEBERSICHT_VERSION}_with_coords.db"
+
+# # Filtered wind plants data
+MASTR_WIND_PLANTS_FILTERED_CSV \
+    = MASTR_DATA_DIR_PROCESSED / f"wind/einheiten_wind_{MASTR_GESAMTDATENUEBERSICHT_VERSION}.csv"
+MASTR_WIND_PLANTS_FILTERED_SQLITE \
+    = MASTR_DATA_DIR_PROCESSED / f"wind/einheiten_wind_{MASTR_GESAMTDATENUEBERSICHT_VERSION}.db"
+
+
+# ---- SMARD data ----
+SMARD_RAW_DATA_DIR = RAW_DATA_DIR / "smard"
+
+# Solar
+SMARD_SOLAR_DATA_DIR_RAW = SMARD_RAW_DATA_DIR / "solar"
+SMARD_SOLAR_GENERATION_SERIES_JSON_TEMPLATE = SMARD_SOLAR_DATA_DIR_RAW / "smard_solar_generation_{start}_{end}.json"
+
+
+# ---- Geonames postal code data ----
+GEONAMES_POSTAL_CODE_DATA = RAW_DATA_DIR / "geonames/geonames_postal_code_data_DE.zip"
+
+
+# ---- Capacity grids ----
+CAPACITY_GRIDS_DIR = PROCESSED_DATA_DIR / "capacity_grids"
+SOLAR_CAPACITY_GRIDS_ZARR_STORE = CAPACITY_GRIDS_DIR / "solar"
+
+GRID_REFERENCE_DS_STORE = ERA5_RAW_SOLAR_DATA_DIR / "ssrd/ssrd_2015-01.nc"
+
+
+# ---- DWD COSMO REA6 ----
 DWD_DATA_DIR_RAW = RAW_DATA_DIR / "dwd"
 DWD_DATA_DIR_PROCESSED = PROCESSED_DATA_DIR / "dwd"
 DWD_DATA_DIR_FEATURES = FEATURES_DATA_DIR / "dwd"
@@ -27,29 +78,4 @@ DWD_WIND_DATA_DIR_RAW = DWD_DATA_DIR_RAW / "wind"
 DWD_WIND_DATA_DIR_FEATURES = DWD_DATA_DIR_FEATURES / "wind"
 
 # Regrid
-TARGET_GRID_ZARR_STORE = PROCESSED_DATA_DIR / "target_grid"
-TARGET_GRID_REF_DS_STORE = DWD_SOLAR_DATA_DIR_RAW / "ASWDIR_S/ASWDIR_S.2D.201702.grb"
-
-
-# ---- MaStR plant data ----
-
-MASTR_DATA_DIR_RAW = RAW_DATA_DIR / "mastr"
-MASTR_GESAMTDATENUEBERSICHT_PATH = MASTR_DATA_DIR_RAW / "Gesamtdatenexport_20260101_25.2.zip"
-
-# Solar
-MASTR_SOLAR_PLANTS_CSV_PATH = MASTR_DATA_DIR_RAW / "solar/einheiten_solar_20260101_25.2.csv"
-MASTR_SOLAR_PLANTS_SQLITE_PATH = MASTR_DATA_DIR_RAW / "solar/einheiten_solar_20260101_25.2.db"
-
-MASTR_WIND_PLANTS_CSV_PATH = MASTR_DATA_DIR_RAW / "wind/einheiten_wind_20260101_25.2.csv"
-MASTR_WIND_PLANTS_SQLITE_PATH = MASTR_DATA_DIR_RAW / "wind/einheiten_wind_20260101_25.2.db"
-
-# Geonames postal code data
-GEONAMES_POSTAL_CODE_DATA = RAW_DATA_DIR / "geonames/geonames_postal_code_data_DE.zip"
-
-# ---- SMARD generation data ----
-
-SMARD_RAW_DATA_DIR = RAW_DATA_DIR / "smard"
-
-# Solar
-SMARD_SOLAR_DATA_DIR_RAW = SMARD_RAW_DATA_DIR / "solar"
-SMARD_SOLAR_GENERATION_SERIES_JSON_TEMPLATE = SMARD_SOLAR_DATA_DIR_RAW / "solar_series_{start}_{end}.json"
+TARGET_GRID_ZARR_STORE = PROCESSED_DATA_DIR / "target_grid"  # <-- obsolete with era5 data

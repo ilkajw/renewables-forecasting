@@ -1,7 +1,7 @@
 from datetime import date
 
-from renewables_forecasting.config.paths import MASTR_GESAMTDATENUEBERSICHT_PATH, MASTR_SOLAR_PLANTS_CSV_PATH, \
-    MASTR_SOLAR_PLANTS_SQLITE_PATH, MASTR_WIND_PLANTS_CSV_PATH, MASTR_WIND_PLANTS_SQLITE_PATH
+from renewables_forecasting.config.paths import MASTR_GESAMTDATENUEBERSICHT_PATH, MASTR_SOLAR_PLANTS_FILTERED_CSV, \
+    MASTR_SOLAR_PLANTS_FILTERED_SQLITE, MASTR_WIND_PLANTS_FILTERED_CSV, MASTR_WIND_PLANTS_FILTERED_SQLITE
 from renewables_forecasting.config.data_sources import MASTR_ZIP_URL, MASTR_SOLAR_VARIABLES
 
 from renewables_forecasting.data.mastr import download_mastr_gesamtdatenuebersicht, \
@@ -20,7 +20,7 @@ def task_download_mastr_gesamtdatenuebersicht(produces=MASTR_GESAMTDATENUEBERSIC
 
 def task_filter_solar_xmls_from_gesamtdatenuebersicht_to_csv(
         depends_on=MASTR_GESAMTDATENUEBERSICHT_PATH,
-        produces=MASTR_SOLAR_PLANTS_CSV_PATH
+        produces=MASTR_SOLAR_PLANTS_FILTERED_CSV
 ):
 
     filter_xmls_from_gesamtdatenuebersicht_to_csv(
@@ -33,14 +33,14 @@ def task_filter_solar_xmls_from_gesamtdatenuebersicht_to_csv(
         exclude_filters={
             "EinheitBetriebsstatus": "31"  # filter out plants still 'InPlanung'
         },
-        out_csv=MASTR_SOLAR_PLANTS_CSV_PATH
+        out_csv=MASTR_SOLAR_PLANTS_FILTERED_CSV
     )
 
 
-def task_solar_csv_to_sqlite(depends_on=MASTR_SOLAR_PLANTS_CSV_PATH, produces=MASTR_SOLAR_PLANTS_SQLITE_PATH):
+def task_solar_csv_to_sqlite(depends_on=MASTR_SOLAR_PLANTS_FILTERED_CSV, produces=MASTR_SOLAR_PLANTS_FILTERED_SQLITE):
     csv_to_sql(
-        csv_path=MASTR_SOLAR_PLANTS_CSV_PATH,
-        sql_path=MASTR_SOLAR_PLANTS_SQLITE_PATH
+        csv_path=MASTR_SOLAR_PLANTS_FILTERED_CSV,
+        sql_path=MASTR_SOLAR_PLANTS_FILTERED_SQLITE
     )
 
 

@@ -11,7 +11,7 @@ from pyproj import Transformer, CRS
 
 from renewables_forecasting.config.technologies import TechnologyConfig, WeatherVariableSource
 from renewables_forecasting.config.paths import DWD_SOLAR_DATA_DIR_RAW, DWD_WIND_DATA_DIR_RAW
-from renewables_forecasting.config.grid import LAT_MIN, LAT_MAX, LON_MIN, LON_MAX
+from renewables_forecasting.config.data_constants import GERMANY_LAT_MIN, GERMANY_LAT_MAX, GERMANY_LON_MIN, GERMANY_LON_MAX
 
 
 # -----------------------------------------------------------------------------
@@ -135,7 +135,7 @@ def _normalize_lon_180(lon):
 
 
 def _slice_germany_from_epsg_4326_grid(lat2d: xr.DataArray, lon2d: xr.DataArray):
-    mask = (lat2d >= LAT_MIN) & (lat2d <= LAT_MAX) & (lon2d >= LON_MIN) & (lon2d <= LON_MAX)
+    mask = (lat2d >= GERMANY_LAT_MIN) & (lat2d <= GERMANY_LAT_MAX) & (lon2d >= GERMANY_LON_MIN) & (lon2d <= GERMANY_LON_MAX)
     lat2d_germany = lat2d.where(mask)
     lon2d_germany = lon2d.where(mask)
 
