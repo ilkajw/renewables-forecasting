@@ -10,7 +10,7 @@ dependencies = [
     "pyproj",
     "numpy",
     "matplotlib",
-    "cfgrib",
+    "cfgrib",  # for DWD
     "eccodes",
     "netcdf4",
     "scipy",
@@ -19,7 +19,9 @@ dependencies = [
     "pyresample",
     "pandas",
     "sqlite3",
-    "cdsapi"
+    "cdsapi",
+    "dateutil",
+    "cartopy"
 ]
 
 [tool.pytask.ini_options]
