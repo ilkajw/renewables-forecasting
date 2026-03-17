@@ -170,3 +170,140 @@ def csv_to_sql(csv_path: Path, sql_path: Path, overwrite: bool = True):
     with sqlite3.connect(sql_path) as conn:
         for chunk in pd.read_csv(csv_path, chunksize=100_000, dtype={'Postleitzahl': str}):
             chunk.to_sql("einheiten_solar", conn, if_exists='append', index=False)
+
+
+def resolve_solar_plant_commissioning_dates(
+        plants_csv_path: Path,
+        out_csv_path: Path,
+        rejected_csv_path: Path,
+) -> None:
+    """
+    Preprocessing step between raw MaStR CSV ingestion and coord assignment.
+
+    Reads the filtered solar plant CSV, handles the
+    InbetriebnahmedatumAmAktuellenStandort field, and writes two outputs:
+
+      out_csv_path:
+          Cleaned plant data with an added InbetriebnahmedatumEffektiv column.
+          This is the date the grid building code should use instead of
+          Inbetriebnahmedatum directly. For relocated plants with a valid
+          (non-negative) gap it equals InbetriebnahmedatumAmAktuellenStandort;
+          for all other plants it equals Inbetriebnahmedatum.
+
+      rejected_csv_path:
+          Plants with a negative gap (InbetriebnahmedatumAmAktuellenStandort <
+          Inbetriebnahmedatum) — these have internally inconsistent dates and
+          are excluded from the cleaned output. Saved separately so statistics
+          can be recovered later.
+
+    The original Inbetriebnahmedatum column is preserved unchanged in both
+    outputs so the substitution is fully auditable.
+
+    Parameters
+    ----------
+    plants_csv_path:
+        Path to the filtered solar plant CSV produced by
+        filter_xmls_from_gesamtdatenuebersicht_to_csv().
+    out_csv_path:
+        Path to write the cleaned plant CSV.
+    rejected_csv_path:
+        Path to write the rejected (bad-data) plant CSV.
+    """
+
+    out_csv_path.parent.mkdir(parents=True, exist_ok=True)
+    rejected_csv_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # ── Load ──────────────────────────────────────────────────────────────────
+
+    print("Loading raw plant data from CSV ...")
+
+    df = pd.read_csv(plants_csv_path, dtype={"Postleitzahl": str})
+
+    print(f"  Total plants loaded: {len(df):,}")
+
+    # Explicitly convert date columns — read_csv can silently produce object
+    # dtype when values are mixed or empty, which causes date arithmetic to fail
+    for col in ["Inbetriebnahmedatum", "InbetriebnahmedatumAmAktuellenStandort"]:
+        df[col] = pd.to_datetime(df[col], errors="coerce")
+
+    df["Nettonennleistung"] = pd.to_numeric(df["Nettonennleistung"], errors="coerce")
+
+    # ── Identify plant categories ─────────────────────────────────────────────
+
+    has_reloc = df["InbetriebnahmedatumAmAktuellenStandort"].notna()
+
+    # Compute gap only where relocation date is present
+    df.loc[has_reloc, "gap_days"] = (
+            df.loc[has_reloc, "InbetriebnahmedatumAmAktuellenStandort"]
+            - df.loc[has_reloc, "Inbetriebnahmedatum"]
+    ).dt.days
+
+    # Three categories:
+    #   1. No relocation date — standard plants, use Inbetriebnahmedatum as-is
+    #   2. Valid relocation (gap >= 0) — use InbetriebnahmedatumAmAktuellenStandort
+    #   3. Invalid relocation (gap < 0) — bad data, exclude entirely
+    no_reloc = ~has_reloc
+    valid_reloc = has_reloc & (df["gap_days"] >= 0)
+    invalid_reloc = has_reloc & (df["gap_days"] < 0)
+
+    print(f"\n  Plant categories:")
+    print(f"    No relocation date:       {no_reloc.sum():>10,}")
+    print(f"    Valid relocation (>=0d):  {valid_reloc.sum():>10,}")
+    print(f"    Invalid relocation (<0d): {invalid_reloc.sum():>10,}  -> rejected")
+
+    # ── Reject bad-data plants ────────────────────────────────────────────────
+
+    df_rejected = df[invalid_reloc].copy()
+
+    print(f"\n  Rejected plants:")
+    print(f"    Count:                   {len(df_rejected):,}")
+    print(f"    Total Nettonennleistung: {df_rejected['Nettonennleistung'].sum() / 1e3:.2f} MW")
+
+    df_rejected.drop(columns=["gap_days"]).to_csv(rejected_csv_path, index=False)
+    print(f"  Rejected plants saved to: {rejected_csv_path}")
+
+    # ── Build InbetriebnahmedatumEffektiv ─────────────────────────────────────
+    # Default to Inbetriebnahmedatum for all plants, then overwrite for valid
+    # relocated plants with InbetriebnahmedatumAmAktuellenStandort.
+    # The original Inbetriebnahmedatum column is never modified.
+
+    df_clean = df[~invalid_reloc].copy()
+
+    # Start with Inbetriebnahmedatum as the default for all plants
+    df_clean["InbetriebnahmedatumEffektiv"] = df_clean["Inbetriebnahmedatum"]
+
+    # Overwrite for valid relocated plants using their current-location date.
+    # Use EinheitMastrNummer as the alignment key to avoid any index
+    # misalignment after the invalid_reloc filter above.
+    reloc_mask = df_clean["gap_days"] >= 0
+    df_clean.loc[reloc_mask, "InbetriebnahmedatumEffektiv"] = (
+        df_clean.loc[reloc_mask, "InbetriebnahmedatumAmAktuellenStandort"]
+    )
+
+    # ── Sanity check ──────────────────────────────────────────────────────────
+
+    n_missing_effektiv = (
+            df_clean["InbetriebnahmedatumEffektiv"].isna()
+            & df_clean["Inbetriebnahmedatum"].notna()
+    ).sum()
+    if n_missing_effektiv > 0:
+        print(f"\n  WARNING: {n_missing_effektiv} plants have NaT "
+              f"InbetriebnahmedatumEffektiv despite valid Inbetriebnahmedatum "
+              f"— check preprocessing logic.")
+
+    # ── Summary ───────────────────────────────────────────────────────────────
+
+    print(f"\n  InbetriebnahmedatumEffektiv substitutions:")
+    print(f"    Plants using Inbetriebnahmedatum (unchanged):        "
+          f"{no_reloc.sum():>10,}")
+    print(f"    Plants using InbetriebnahmedatumAmAktuellenStandort: "
+          f"{valid_reloc.sum():>10,}")
+
+    # ── Write cleaned output ──────────────────────────────────────────────────
+
+    # Drop the temporary gap_days column — only needed for categorisation
+    df_clean = df_clean.drop(columns=["gap_days"])
+
+    df_clean.to_csv(out_csv_path, index=False)
+    print(f"\n  Cleaned plants saved to: {out_csv_path}")
+    print(f"  Total plants in cleaned output: {len(df_clean):,}")
