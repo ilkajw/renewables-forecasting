@@ -1,12 +1,12 @@
 from dataclasses import dataclass
 
-# ---- ERA5 weather data ----
+# ---- Copernicus ERA5 ----
 
 ERA5_SOLAR_VARIABLES = {
     "ssrd": "surface_solar_radiation_downwards",
-    #"strd": "surface_thermal_radiation_downwards",
-    #"t2m": "2m_temperature",
-    #"skt": "skin_temperature",
+    # "strd": "surface_thermal_radiation_downwards",
+    # "t2m": "2m_temperature",
+    # "skt": "skin_temperature",
 }
 
 
@@ -18,7 +18,38 @@ ERA5_WIND_VARIABLES = {
 }
 
 
-# ---- DWD weather data sources ----
+# ---- MaStR ----
+
+MASTR_GESAMTDATENUEBERSICHT_VERSION = "20260308_25.2"
+MASTR_ZIP_URL = f"https://download.marktstammdatenregister.de/Gesamtdatenexport_{MASTR_GESAMTDATENUEBERSICHT_VERSION}.zip"
+
+MASTR_SOLAR_VARIABLES = ["NameStromerzeugungseinheit", "EinheitMastrNummer", "Bundesland", "Landkreis", "Gemeinde",
+                         "Gemeindeschluessel", "Postleitzahl", "Strasse", "Ort", "Laengengrad", "Breitengrad",
+                         "Inbetriebnahmedatum", "DatumEndgueltigeStilllegung", "DatumBeginnVoruebergehendeStilllegung",
+                         "DatumWiederaufnahmeBetrieb", "EinheitBetriebsstatus", "Bruttoleistung",
+                         "Nettonennleistung", "Einspeisungsart", "Leistungsbegrenzung",
+                         "InbetriebnahmedatumAmAktuellenStandort"
+                         ]
+
+MASTR_WIND_VARIABLES = ["NameStromerzeugungseinheit", "EinheitMastrNummer", "Bundesland", "Landkreis", "Gemeinde",
+                         "Gemeindeschluessel", "Postleitzahl", "Strasse", "Ort", "Laengengrad", "Breitengrad",
+                         "Inbetriebnahmedatum", "DatumEndgueltigeStilllegung", "DatumBeginnVoruebergehendeStilllegung",
+                         "DatumWiederaufnahmeBetrieb", "EinheitBetriebsstatus", "Kraftwerksnummer", "Bruttoleistung",
+                         "Nettonennleistung", "Einspeisungsart", "WindAnLandOderAufSee", "Nabenhoehe",
+                         "InbetriebnahmedatumAmAktuellenStandort"
+                        ]
+
+# ---- SMARD ----
+
+SMARD_SOLAR_GENERATION_TIMESTAMPS_URL = "https://www.smard.de/app/chart_data/4068/DE/index_hour.json"
+SMARD_SOLAR_GENERATION_URL_TEMPLATE = "https://www.smard.de/app/chart_data/4068/DE/4068_DE_hour_{timestamp}.json"
+
+
+# ---- Geonames ----
+GEONAMES_POSTAL_CODES_DATA_URL = "https://download.geonames.org/export/zip/DE.zip"
+
+
+# ---- DWD COSMO REA6 ----
 
 @dataclass(frozen=True)
 class WeatherVariableSource:
@@ -55,37 +86,3 @@ DWD_COSMO_REA6_WIND = {
         base_url="https://opendata.dwd.de/climate_environment/REA/COSMO_REA6/converted/hourly/2D/WS_125",
         filename_pattern="{var}m.2D.{year}{month:02d}.nc4"),
 }
-
-
-# Geonames postal code data for Germany
-
-GEONAMES_POSTAL_CODES_URL = "https://download.geonames.org/export/zip/DE.zip"
-
-
-
-# ---- MaStR plant data sources ----
-
-MASTR_VERSION_NAME = "Gesamtdatenexport_20260101_25.2.zip"
-
-MASTR_ZIP_URL = f"https://download.marktstammdatenregister.de/Stichtag/{MASTR_VERSION_NAME}"
-
-MASTR_SOLAR_VARIABLES = ["NameStromerzeugungseinheit", "EinheitMastrNummer", "Bundesland", "Landkreis", "Gemeinde",
-                         "Gemeindeschluessel", "Postleitzahl", "Strasse", "Ort", "Laengengrad", "Breitengrad",
-                         "Inbetriebnahmedatum", "DatumEndgueltigeStilllegung", "DatumBeginnVoruebergehendeStilllegung",
-                         "DatumWiederaufnahmeBetrieb", "EinheitBetriebsstatus", "Bruttoleistung",
-                         "Nettonennleistung", "Einspeisungsart", "Leistungsbegrenzung",
-                         "InbetriebnahmedatumAmAktuellenStandort"
-                         ]
-
-MASTR_WIND_VARIABLES = ["NameStromerzeugungseinheit", "EinheitMastrNummer", "Bundesland", "Landkreis", "Gemeinde",
-                         "Gemeindeschluessel", "Postleitzahl", "Strasse", "Ort", "Laengengrad", "Breitengrad",
-                         "Inbetriebnahmedatum", "DatumEndgueltigeStilllegung", "DatumBeginnVoruebergehendeStilllegung",
-                         "DatumWiederaufnahmeBetrieb", "EinheitBetriebsstatus", "Kraftwerksnummer", "Bruttoleistung",
-                         "Nettonennleistung", "Einspeisungsart", "WindAnLandOderAufSee", "Nabenhoehe",
-                         "InbetriebnahmedatumAmAktuellenStandort"
-                         ]
-# ---- SMARD electricity generation data sources ----
-
-SMARD_SOLAR_GENERATION_TIMESTAMPS_URL = "https://www.smard.de/app/chart_data/4068/DE/index_hour.json"
-
-SMARD_SOLAR_GENERATION_URL_TEMPLATE = "https://www.smard.de/app/chart_data/4068/DE/4068_DE_hour_{timestamp}.json"

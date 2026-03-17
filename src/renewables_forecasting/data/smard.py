@@ -37,27 +37,29 @@ def download_smard_solar_gen(
         connect_timeout: int
 ):
 
-    check_template(url_template, ["timestamp"])  # Check for expected template string key word
+    check_template(url_template, ["timestamp"])  # Check for expected template string key word in url
     check_template(str(out_path_template), ["start", "end"])  # out_path_template is Path as defined in paths.py
 
+    # Construct out_path from path template, start and end
     out_path = Path(str(out_path_template).format(start=start.strftime("%Y%m%d"), end=end.strftime("%Y%m%d")))
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
-    timestamps = resolve_smard_timestamps(start, end)  # Get list of timestamps relevant to our time interval
+    # Get list of unix timestamps relevant to time interval from requested 'start' to 'end'
+    timestamps = resolve_smard_timestamps(start, end)
 
     data = {"series": []}
 
+    # Download data for every relevant timestamp
     for timestamp in timestamps:
 
+        # Format url from url template and timestamp
         url = url_template.format(timestamp=timestamp)
-
         response = requests.get(url, timeout=(connect_timeout, read_timeout))  # Call API for current timestamp
         response.raise_for_status()
-        data["series"].extend(response.json()["series"])  # Concatenate (timestamp, generation volume) series
+        # Concatenate entry of format (timestamp, generation volume) to series
+        data["series"].extend(response.json()["series"])
         time.sleep(0.5)  # At least half a sec between calls
 
     with open(out_path, "w") as out:
         json.dump(data, out)  # Save
-
-
