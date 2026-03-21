@@ -5,7 +5,7 @@ from dataclasses import dataclass
 ERA5_SOLAR_VARIABLES = {
     "ssrd": "surface_solar_radiation_downwards",
     # "strd": "surface_thermal_radiation_downwards",
-    # "t2m": "2m_temperature",
+    "t2m": "2m_temperature",
     # "skt": "skin_temperature",
 }
 
@@ -36,7 +36,8 @@ MASTR_WIND_VARIABLES = ["NameStromerzeugungseinheit", "EinheitMastrNummer", "Bun
                          "Inbetriebnahmedatum", "DatumEndgueltigeStilllegung", "DatumBeginnVoruebergehendeStilllegung",
                          "DatumWiederaufnahmeBetrieb", "EinheitBetriebsstatus", "Kraftwerksnummer", "Bruttoleistung",
                          "Nettonennleistung", "Einspeisungsart", "WindAnLandOderAufSee", "Nabenhoehe",
-                         "InbetriebnahmedatumAmAktuellenStandort"
+                         "InbetriebnahmedatumAmAktuellenStandort", "WindAnLandOderAufSee",
+                        "AuflageAbschaltungLeistungsbegrenzung"
                         ]
 
 # ---- SMARD ----
