@@ -11,6 +11,8 @@ GERMANY_LAT_MIN, GERMANY_LAT_MAX = 47.25, 55.00
 EUROPE_LON_MIN, EUROPE_LON_MAX = -25.0, 45.0
 EUROPE_LAT_MIN, EUROPE_LAT_MAX = 34.5, 71.5
 
+# German local timezone — handles CET/CEST transitions automatically
+GERMAN_TZ = "Europe/Berlin"
 
 # PLZs missing in Geonames Postal Code data. They were looked up manually on Google Maps
 MISSING_PLZS_TO_COORDS_DICT = {
