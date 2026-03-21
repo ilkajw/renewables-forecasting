@@ -8,7 +8,9 @@ import xml.etree.ElementTree as ET
 from urllib.parse import urlparse
 from datetime import date
 from pathlib import Path
-from typing import List
+from typing import List, Dict, Tuple
+
+from renewables_forecasting.config.data_constants import MISSING_PLZS_TO_COORDS_DICT
 
 
 def filename_from_url(url: str) -> str:
@@ -120,48 +122,6 @@ def filter_xmls_from_gesamtdatenuebersicht_to_csv(
                         elem.clear()  # Free memory
 
 
-def filter_wind_xml_from_gesamtdatenuebersicht_to_csv(
-        zip_path: Path,
-        inbetriebnahme_start: date,
-        inbetriebnahme_end: date,
-        variables: List[str],
-        out_csv: Path = Path("einheiten_wind.csv")
-) -> None:
-
-    out_csv.parent.mkdir(parents=True, exist_ok=True)
-
-    # Open zip to read solar xml from. Open solar xml and output file
-    with zipfile.ZipFile(zip_path) as zf, open(out_csv, "w", newline="", encoding="utf-8") as out:
-
-        # Prep out_csv file
-        w = csv.writer(out)
-        w.writerow(variables)
-
-        # Collect all files with naming 'EinheitenWind_x.xml', x=[1, 49] from zip
-        wind_xmls = [n for n in zf.namelist() if "EinheitenWind" in n]
-
-        # iterparse stopping after every full element, loop through xml tree elements with index (event, elem)
-        for f in wind_xmls:
-            with zf.open(f) as curr_xml:
-                for _, elem in ET.iterparse(curr_xml, events=("end",)):
-
-                    # Filter for EinheitSolar elements, leaving out any meta data
-                    if elem.tag.endswith("EinheitWind"):
-
-                        # Get Inbetriebnahmedatum to filter for plants of interest
-                        d = elem.findtext("Inbetriebnahmedatum")
-                        d = date.fromisoformat(d) if d else None  # Get python date type
-
-                        # Extract variables for solar units of interest
-                        if d is None or (inbetriebnahme_start <= d <= inbetriebnahme_end):
-                            fields = [elem.findtext(var) or "" for var in variables]
-
-                            # Write unit data to csv file
-                            w.writerow(fields)
-
-                        elem.clear()  # Free memory
-
-
 def csv_to_sql(csv_path: Path, sql_path: Path, overwrite: bool = True):
 
     if overwrite:
@@ -172,7 +132,7 @@ def csv_to_sql(csv_path: Path, sql_path: Path, overwrite: bool = True):
             chunk.to_sql("einheiten_solar", conn, if_exists='append', index=False)
 
 
-def resolve_solar_plant_commissioning_dates(
+def resolve_plant_commissioning_dates(
         plants_csv_path: Path,
         out_csv_path: Path,
         rejected_csv_path: Path,
@@ -307,3 +267,96 @@ def resolve_solar_plant_commissioning_dates(
     df_clean.to_csv(out_csv_path, index=False)
     print(f"\n  Cleaned plants saved to: {out_csv_path}")
     print(f"  Total plants in cleaned output: {len(df_clean):,}")
+
+
+def download_geonames_postal_code_data(
+        url: str,
+        out_path: Path,
+        connect_timeout: int = 30,
+        read_timeout: int = 600,
+) -> None:
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # tmp file for partial downloads avoids corrupted zip at out_path
+    tmp_path = out_path.with_suffix(".tmp")
+
+    try:
+        with requests.get(url, stream=True, timeout=(connect_timeout, read_timeout)) as response:
+            response.raise_for_status()
+
+            with open(tmp_path, "wb") as tmp:
+                for chunk in response.iter_content(chunk_size=1024*1024):
+                    if chunk:
+                        tmp.write(chunk)
+
+            tmp_path.replace(out_path)
+
+    except Exception:
+        tmp_path.unlink(missing_ok=True)
+        raise
+
+
+def _get_plz_to_lat_lon_mapping(
+        plz_zip_path: Path,
+        file_name: str = "DE.txt"
+) -> Dict[str, Tuple[float, float]]:
+
+    # Open geonames zip
+    with zipfile.ZipFile(plz_zip_path) as zf:
+        with zf.open(file_name) as f:
+            # get data frame from txt file
+            plz_df = pd.read_csv(
+                f,
+                sep='\t',
+                header=None,
+                names=['country', 'plz', 'city', 'state', 'state_code',
+                       'district', 'dist_code', 'county', 'county_code',
+                       'lat', 'lon', 'accuracy'],
+                dtype={'plz': str}
+            )
+
+    # Filter out company and institution entries
+    plz_df = plz_df[plz_df['state_code'].str.isalpha().fillna(False)]
+
+    # Get plz: (lat, lon)) dict
+    plz_to_coords = dict(zip(plz_df['plz'].astype(str),
+                             zip(plz_df['lat'], plz_df['lon'])))
+
+    # Add missing PLZs that were looked up manually
+    plz_to_coords = MISSING_PLZS_TO_COORDS_DICT | plz_to_coords
+
+    return plz_to_coords
+
+
+def assign_coords_to_plants(
+        plz_data_path: Path,
+        plants_csv_path: Path,
+        out_path: Path,
+        keep_existing_coords: bool = False,
+):
+    plz_to_coords_dict = _get_plz_to_lat_lon_mapping(plz_data_path)
+
+    plants_df = pd.read_csv(plants_csv_path, dtype={'Postleitzahl': str})
+
+    # Warn about inconsistent coords
+    for idx, plant in plants_df.iterrows():
+        if pd.isna(plant["Breitengrad"]) and not pd.isna(plant["Laengengrad"]):
+            print(f"Got Laengengrad but not Breitengrad for {plant['EinheitMastrNummer']}, overwriting both.")
+        elif pd.isna(plant["Laengengrad"]) and not pd.isna(plant["Breitengrad"]):
+            print(f"Got Breitengrad but not Laengengrad for {plant['EinheitMastrNummer']}, overwriting both.")
+
+    # Vectorized coord assignment for missing values
+    if keep_existing_coords:
+        missing = pd.isna(plants_df["Breitengrad"]) | pd.isna(plants_df["Laengengrad"])
+        coords = plants_df.loc[missing, "Postleitzahl"].astype(str).map(plz_to_coords_dict)
+        plants_df.loc[missing, "Breitengrad"] = coords.map(lambda x: x[0] if pd.notna(x) else None)
+        plants_df.loc[missing, "Laengengrad"] = coords.map(lambda x: x[1] if pd.notna(x) else None)
+
+    else:
+        # Extract coords with plant indices
+        coords = plants_df["Postleitzahl"].astype(str).map(plz_to_coords_dict)
+        plants_df["Breitengrad"] = coords.map(lambda x: x[0] if pd.notna(x) else None)
+        plants_df["Laengengrad"] = coords.map(lambda x: x[1] if pd.notna(x) else None)
+
+    plants_df.to_csv(out_path, index=False)
