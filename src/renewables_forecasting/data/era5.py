@@ -1,11 +1,19 @@
 import cdsapi
-from typing import Dict
+import xarray as xr
+import pandas as pd
 from pathlib import Path
 from datetime import date
+from typing import Dict, List
 from dateutil.relativedelta import relativedelta
 
 from renewables_forecasting.config.paths import ERA5_RAW_DATA_DIR
-from renewables_forecasting.config.data_constants import GERMANY_LON_MAX, GERMANY_LON_MIN, GERMANY_LAT_MAX, GERMANY_LAT_MIN
+from renewables_forecasting.config.data_constants import (
+    GERMAN_TZ,
+    GERMANY_LON_MAX,
+    GERMANY_LON_MIN,
+    GERMANY_LAT_MAX,
+    GERMANY_LAT_MIN
+)
 
 
 def download_era5(
@@ -33,6 +41,7 @@ def download_era5(
         while d <= end:
             out_file = var_dir / f"{var_short}_{d.year}-{d.month:02d}.nc"
             if out_file.exists():
+                d += relativedelta(months=1)
                 continue
 
             year, month = d.year, d.month
@@ -53,3 +62,345 @@ def download_era5(
 
             d += relativedelta(months=1)
 
+
+def convert_era5_utc_to_german_time(
+        in_dir: Path,
+        out_dir: Path,
+        variables: List[str],
+        file_pattern: str = "{variable}_{year}-{month:02d}.nc",
+) -> None:
+    """
+    Converts ERA5 NetCDF files from UTC to German local time (CET/CEST,
+    Europe/Berlin) and saves the converted files to out_dir.
+
+    ERA5 data is always in UTC by convention. SMARD generation data and MaStR
+    plant data are in German local time (CET in winter, CEST in summer).
+    Converting ERA5 to German local time ensures all pipeline inputs share
+    the same time axis, avoiding misalignment at the daylight saving
+    transitions in March and October.
+
+    DST transitions produce one 23-hour day in March (clocks spring forward,
+    one hour is skipped) and one 25-hour day in October (clocks fall back,
+    one hour is duplicated). xarray handles this correctly via pandas
+    DatetimeIndex with timezone information.
+
+    Timestamps are stored as timezone-naive in the output NetCDF files since
+    NetCDF does not support timezone-aware timestamps natively. The timezone
+    is documented in the time variable's attributes.
+
+    Files are read from and written to per-variable subdirectories:
+    in_dir/{variable}/ -> out_dir/{variable}/. Years and months are inferred
+    from filenames in the first variable's subdirectory.
+
+    Parameters
+    ----------
+    in_dir:
+        Root directory containing per-variable subdirectories of ERA5 NetCDF
+        files in UTC. Structure: in_dir/{variable}/{variable}_{year}-{month}.nc
+    out_dir:
+        Root directory to write converted files to. Same subdirectory structure
+        as in_dir is created automatically.
+    variables:
+        List of ERA5 variable names to convert, e.g. ['ssrd', 't2m'].
+    file_pattern:
+        Pattern for ERA5 file names within each variable's subdirectory.
+        Must contain {variable}, {year}, {month}.
+        Default: {variable}_{year}-{month:02d}.nc
+    """
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    # Infer years and months from filenames in the first variable's subdir.
+    # All variables are assumed to cover the same years and months.
+    ref_var = variables[0]
+    ref_var_dir = in_dir / ref_var
+
+    years = sorted(set(
+        int(f.stem.split("_")[1].split("-")[0])
+        for f in ref_var_dir.glob(f"{ref_var}_*.nc")
+    ))
+    months = sorted(set(
+        int(f.stem.split("_")[1].split("-")[1])
+        for f in ref_var_dir.glob(f"{ref_var}_*.nc")
+    ))
+
+    print(f"  Inferred years:  {years}")
+    print(f"  Inferred months: {months}")
+    print(f"\nConverting {len(variables)} variable(s) across {len(years)} year(s) "
+          f"to German local time ({GERMAN_TZ}) ...")
+
+    for var in variables:
+        print(f"\n  Variable: {var}")
+
+        # Create output subdirectory for this variable
+        var_out_dir = out_dir / var
+        var_out_dir.mkdir(parents=True, exist_ok=True)
+
+        for year in years:
+            for month in months:
+
+                in_path = in_dir / var / file_pattern.format(variable=var, year=year, month=month)
+                out_path = var_out_dir / file_pattern.format(variable=var, year=year, month=month)
+
+                if not in_path.exists():
+                    print(f"    Skipping {in_path.name} — file not found")
+                    continue
+
+                ds = xr.open_dataset(in_path)
+
+                # ERA5 timestamps are timezone-naive UTC by convention.
+                # Localize to UTC first, then convert to German local time.
+                times_utc = pd.DatetimeIndex(ds.time.values)
+
+                if times_utc.tz is None:
+                    # Timezone-naive — assume UTC as per ERA5 convention
+                    times_utc = times_utc.tz_localize("UTC")
+                else:
+                    # Already timezone-aware — convert to UTC to be safe
+                    times_utc = times_utc.tz_convert("UTC")
+
+                # Convert UTC to German local time (CET in winter, CEST in summer).
+                # pandas handles DST transitions automatically:
+                #   March transition:   one hour is skipped (23-hour day)
+                #   October transition: one hour is repeated (25-hour day)
+                times_german = times_utc.tz_convert(GERMAN_TZ)
+
+                # Strip timezone info before writing — NetCDF does not support
+                # timezone-aware timestamps. The timezone is preserved in attrs.
+                ds = ds.assign_coords(
+                    time=("time", times_german.tz_localize(None))
+                )
+                ds.time.attrs["timezone"] = GERMAN_TZ
+                ds.time.attrs["note"] = (
+                    "Timestamps converted from UTC to Europe/Berlin (CET/CEST). "
+                    "Timezone info stripped for NetCDF compatibility but is "
+                    "documented in this attribute."
+                )
+
+                ds.to_netcdf(out_path)
+                print(f"    {in_path.name} -> {out_path.name}  "
+                      f"({times_german[0]} to {times_german[-1]})")
+
+    print(f"\nDone. Converted files saved to: {out_dir.resolve()}")
+
+
+def build_daylight_mask(
+        ssrd_dir: Path,
+        out_path: Path,
+        buffer_hours: int = 2,
+        file_pattern: str = "ssrd_{year}-{month:02d}.nc",
+) -> None:
+    """
+    Computes a boolean daylight mask from ERA5 surface solar radiation downwards
+    (ssrd) across the full study period and saves it as a NetCDF file for
+    reuse across the pipeline.
+
+    All monthly ssrd files in ssrd_dir are concatenated along the time
+    dimension before computing the mask, ensuring the mask covers the full
+    study period (e.g. 2015-2025) with year- and month-specific day length
+    and DST transitions correctly captured for every individual date.
+
+    The mask is True for all hours where any ERA5 grid cell over Germany has
+    non-zero irradiance, extended by buffer_hours on each side to include a
+    few zero-irradiance hours around sunrise and sunset. This allows the model
+    to learn the ramp-up and ramp-down behaviour of solar generation.
+
+    All deep night hours (far from any daylight window) are False and should
+    be excluded from training.
+
+    The ssrd data must already be in German local time (i.e. after running
+    convert_era5_utc_to_german_time) so the mask aligns correctly with SMARD
+    generation data which is in CET/CEST.
+
+    Parameters
+    ----------
+    ssrd_dir:
+        Directory containing monthly ERA5 ssrd NetCDF files, already converted
+        to German local time. Files are discovered via file_pattern glob.
+    out_path:
+        Path to write the daylight mask NetCDF file. Contains a single boolean
+        variable 'daylight_mask' with dimension (time) covering the full period
+        spanned by the ssrd files in ssrd_dir.
+    buffer_hours:
+        Number of zero-irradiance hours to include on each side of the daylight
+        window. Default is 2, giving the model context on the sunrise/sunset
+        transition. Set to 0 for a strict irradiance > 0 mask.
+    file_pattern:
+        Glob pattern to discover ssrd files in ssrd_dir. Default matches
+        ssrd_{year}-{month:02d}.nc, e.g. ssrd_2015-01.nc.
+    """
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Discover and sort all monthly ssrd files in the directory.
+    # Sorting by filename ensures chronological order since filenames contain
+    # year and month in YYYY-MM format.
+    files = sorted(ssrd_dir.glob(file_pattern.replace("{year}", "*").replace("{month:02d}", "*")))
+
+    if not files:
+        raise FileNotFoundError(
+            f"No ssrd files found in {ssrd_dir} matching pattern '{file_pattern}'. "
+            f"Ensure convert_era5_utc_to_german_time() has been run first."
+        )
+
+    print(f"Found {len(files)} monthly ssrd files in {ssrd_dir}")
+    print(f"  First: {files[0].name}")
+    print(f"  Last:  {files[-1].name}")
+
+    # Concatenate all monthly files along the time dimension.
+    # combine='by_coords' sorts and aligns files by their time coordinate.
+    print("\nConcatenating all monthly ssrd files ...")
+    ds = xr.open_mfdataset(files, combine="by_coords")
+
+    # Reduce spatial dimensions — True where any grid cell has irradiance > 0.
+    # Using max across lat/lon means the mask is True if *any* part of Germany
+    # has daylight, giving the most inclusive possible window.
+    print("Computing spatial maximum of ssrd across all grid cells ...")
+    ssrd_max = ds["ssrd"].max(dim=["latitude", "longitude"])
+    daylight = ssrd_max > 0
+
+    print(f"Extending daylight window by {buffer_hours} hours on each side ...")
+
+    if buffer_hours > 0:
+        # Rolling max over a window of (2 * buffer_hours + 1) centred on each
+        # hour. Any hour within buffer_hours of a daylight hour becomes True.
+        window = 2 * buffer_hours + 1
+        daylight_extended = (
+            daylight
+            .rolling(time=window, center=True, min_periods=1)
+            .max()
+            .astype(bool)
+        )
+    else:
+        daylight_extended = daylight
+
+    # Sanity check: report coverage
+    n_total = len(daylight_extended.time)
+    n_daylight = int(daylight_extended.sum())
+    n_night = n_total - n_daylight
+    pct = n_daylight / n_total * 100
+
+    print(f"\n  Total hours:     {n_total:,}")
+    print(f"  Daylight hours:  {n_daylight:,}  ({pct:.1f}%)")
+    print(f"  Night hours:     {n_night:,}  ({100 - pct:.1f}%)")
+
+    # Save as NetCDF
+    daylight_extended.name = "daylight_mask"
+    daylight_extended.attrs = {
+        "description": (
+            "Boolean daylight mask derived from ERA5 ssrd over the full study "
+            "period. True for hours within the daily solar window plus buffer. "
+            "Apply to both ERA5 and SMARD data to exclude night hours. "
+            "Data must be in German local time (Europe/Berlin) before applying."
+        ),
+        "buffer_hours": buffer_hours,
+        "source_dir": str(ssrd_dir),
+        "n_files": len(files),
+        "n_total_hours": n_total,  # <-- add
+        "n_daylight_hours": n_daylight,  # <-- add
+        "n_night_hours": n_night,  # <-- add
+        "pct_daylight": round(pct, 2),  # <-- add
+    }
+
+    daylight_extended.to_dataset(name="daylight_mask").to_netcdf(out_path)
+    print(f"\n  Daylight mask saved to: {out_path}")
+
+
+def apply_daylight_mask_to_era5_variables(
+        mask_path: Path,
+        variables: List[str],
+        era5_dir: Path,
+        out_dir: Path,
+        file_pattern: str = "{variable}_{year}-{month:02d}.nc",
+) -> None:
+    """
+    Applies a precomputed daylight mask to a list of ERA5 variables, loading
+    each monthly file from per-variable subdirectories in era5_dir, filtering
+    to daylight hours, and saving to matching subdirectories in out_dir.
+
+    This is the main entry point for masking ERA5 inputs in the solar pipeline.
+    Run once after build_daylight_mask() and use the output directory as the
+    source for all downstream solar model training steps.
+
+    ERA5 data must already be in German local time (i.e. after running
+    convert_era5_utc_to_german_time) before applying the mask, since the mask
+    is built from ssrd data in German local time.
+
+    Note: do NOT apply this mask to ERA5 variables used for wind generation,
+    as wind turbines operate around the clock and the solar daylight mask is
+    not appropriate for wind.
+
+    Parameters
+    ----------
+    mask_path:
+        Path to the daylight mask NetCDF file produced by build_daylight_mask().
+    variables:
+        List of ERA5 variable names to mask, e.g. ['ssrd', 't2m'].
+    era5_dir:
+        Root directory containing per-variable subdirectories of ERA5 NetCDF
+        files in German local time. Structure: era5_dir/{variable}/files.
+    out_dir:
+        Root directory to write masked files to. Same per-variable subdirectory
+        structure as era5_dir is created automatically.
+    file_pattern:
+        Pattern for ERA5 file names within each variable's subdirectory.
+        Must contain {variable}, {year}, {month}.
+        Default: {variable}_{year}-{month:02d}.nc
+    """
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    # Load mask once and extract daylight timestamps
+    print(f"Loading daylight mask from {mask_path} ...")
+    mask = xr.open_dataset(mask_path)["daylight_mask"]
+    day_times = mask.time.values[mask.values]
+    n_daylight = len(day_times)
+    print(f"  Daylight hours in mask: {n_daylight:,}")
+
+    # Infer years and months from the first variable's subdirectory
+    ref_var = variables[0]
+    ref_var_dir = era5_dir / ref_var
+
+    years = sorted(set(
+        int(f.stem.split("_")[1].split("-")[0])
+        for f in ref_var_dir.glob(f"{ref_var}_*.nc")
+    ))
+    months = sorted(set(
+        int(f.stem.split("_")[1].split("-")[1])
+        for f in ref_var_dir.glob(f"{ref_var}_*.nc")
+    ))
+
+    for var in variables:
+        print(f"\n  Variable: {var}")
+
+        var_out_dir = out_dir / var
+        var_out_dir.mkdir(parents=True, exist_ok=True)
+
+        for year in years:
+            for month in months:
+
+                in_path = era5_dir / var / file_pattern.format(variable=var, year=year, month=month)
+                out_path = var_out_dir / file_pattern.format(variable=var, year=year, month=month)
+
+                if not in_path.exists():
+                    print(f"    Skipping {in_path.name} — file not found")
+                    continue
+
+                ds = xr.open_dataset(in_path)
+
+                # Select only daylight hours that fall within this month's
+                # time range — avoids KeyError when day_times spans years
+                # outside this particular file's coverage
+                month_times = pd.DatetimeIndex(ds.time.values)
+                mask_for_month = pd.DatetimeIndex(day_times)
+                overlap = mask_for_month[
+                    (mask_for_month >= month_times.min()) &
+                    (mask_for_month <= month_times.max())
+                    ]
+
+                ds_filtered = ds.sel(time=overlap)
+                ds_filtered.to_netcdf(out_path)
+                print(f"    {in_path.name} -> {out_path.name}  "
+                      f"({len(overlap):,} daylight hours)")
+
+    print(f"\nDone. All masked variables saved to: {out_dir.resolve()}")
