@@ -148,6 +148,9 @@ def convert_era5_utc_to_german_time(
 
                 ds = xr.open_dataset(in_path)
 
+                if "valid_time" in ds.coords and "time" not in ds.coords:
+                    ds = ds.rename({"valid_time": "time"})
+
                 # ERA5 timestamps are timezone-naive UTC by convention.
                 # Localize to UTC first, then convert to German local time.
                 times_utc = pd.DatetimeIndex(ds.time.values)
@@ -398,9 +401,13 @@ def apply_daylight_mask_to_era5_variables(
                     (mask_for_month <= month_times.max())
                     ]
 
-                ds_filtered = ds.sel(time=overlap)
+                # Use boolean indexing instead of .sel() to handle duplicate timestamps
+                # that arise from the October DST transition (25-hour day)
+                time_mask = pd.DatetimeIndex(ds.time.values).isin(overlap)
+                ds_filtered = ds.isel(time=time_mask)
+
                 ds_filtered.to_netcdf(out_path)
                 print(f"    {in_path.name} -> {out_path.name}  "
-                      f"({len(overlap):,} daylight hours)")
+                      f"({time_mask.sum()} daylight hours)")
 
     print(f"\nDone. All masked variables saved to: {out_dir.resolve()}")
