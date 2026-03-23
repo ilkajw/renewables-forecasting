@@ -83,7 +83,9 @@ def filter_xmls_from_gesamtdatenuebersicht_to_csv(
 
                         # Leave out foreign plants with postal codes of length 4 and 6
                         plz = elem.findtext("Postleitzahl")
-                        if len(plz) != 5:
+
+                        # Take in units with missing plz. For wind only, as there is no solar plant without plz
+                        if plz is not None and len(plz) != 5:
                             continue
 
                         # Get dates to derive periods online and offline
@@ -122,14 +124,14 @@ def filter_xmls_from_gesamtdatenuebersicht_to_csv(
                         elem.clear()  # Free memory
 
 
-def csv_to_sql(csv_path: Path, sql_path: Path, overwrite: bool = True):
+def csv_to_sql(csv_path: Path, sql_path: Path, name_table: str, overwrite: bool = True):
 
     if overwrite:
         sql_path.unlink(missing_ok=True)  # Delete db
 
     with sqlite3.connect(sql_path) as conn:
         for chunk in pd.read_csv(csv_path, chunksize=100_000, dtype={'Postleitzahl': str}):
-            chunk.to_sql("einheiten_solar", conn, if_exists='append', index=False)
+            chunk.to_sql(name_table, conn, if_exists='append', index=False)
 
 
 def resolve_plant_commissioning_dates(
