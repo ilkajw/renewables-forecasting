@@ -31,7 +31,7 @@ def task_filter_wind_plants_to_csv(
         end=date(2025, 12, 31),  # inclusive
         variables=MASTR_WIND_VARIABLES,
         exclude_filters={
-            "EinheitBetriebstatus": "31",  # filter out plants still 'InPlanung',
+            "EinheitBetriebsstatus": "31",  # filter out plants still 'InPlanung'
             # "WindAnLandOderAufSee": "4713"  # offshore plants
         },
         out_csv=MASTR_WIND_PLANTS_FILTERED_CSV
@@ -41,7 +41,8 @@ def task_filter_wind_plants_to_csv(
 def task_wind_csv_to_sqlite(depends_on=MASTR_WIND_PLANTS_FILTERED_CSV, produces=MASTR_WIND_PLANTS_FILTERED_SQLITE):
     csv_to_sql(
         csv_path=MASTR_WIND_PLANTS_FILTERED_CSV,
-        sql_path=MASTR_WIND_PLANTS_FILTERED_SQLITE
+        sql_path=MASTR_WIND_PLANTS_FILTERED_SQLITE,
+        name_table="einheiten_wind"
     )
 
 
@@ -62,7 +63,7 @@ def task_wind_resolve_commissioning_dates(
 
 
 # ── Assign coordinates to all plants based on their postal code ───────────────────────────────────────────────────
-def task_assign_coords_to_solar_plants(
+def task_assign_coords_to_wind_plants(
         depends_on={
             "plants": MASTR_WIND_PLANTS_EFFECTIVE_START_DATE_CSV,
             "plz": GEONAMES_POSTAL_CODE_DATA,
@@ -73,5 +74,5 @@ def task_assign_coords_to_solar_plants(
         plz_data_path=GEONAMES_POSTAL_CODE_DATA,
         plants_csv_path=MASTR_WIND_PLANTS_EFFECTIVE_START_DATE_CSV,
         out_path=MASTR_WIND_PLANTS_EFFECTIVE_START_WITH_COORDS_CSV,
-        keep_existing_coords=False
+        keep_existing_coords=True
     )
