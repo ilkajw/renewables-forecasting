@@ -8,7 +8,7 @@ from datetime import date, timedelta
 from dateutil.relativedelta import relativedelta
 
 
-def _build_initial_solar_cap_grid(
+def _build_initial_cap_grid(
         ref_weather_ds: Path,
         plants_csv: Path,
         start: date,
@@ -182,7 +182,7 @@ def build_capacity_grids(
     assert start_month <= end_month, f"start_month must be before or equal to end_mont. got {start_month} " \
                                      f"for start and {end_month} for end"
     initial_store = out_dir / f"capacity_{start_month.strftime('%Y_%m')}_initial.zarr"
-    _build_initial_solar_cap_grid(ref_weather_ds, plants_csv, start_month, initial_store)
+    _build_initial_cap_grid(ref_weather_ds, plants_csv, start_month, initial_store)
     _build_cap_grids_through_deltas(initial_store, end_month, plants_csv, out_dir)
 
 
