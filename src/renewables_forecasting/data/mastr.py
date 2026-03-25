@@ -1,8 +1,10 @@
 import requests
 import zipfile
 import csv
-import pandas as pd
 import sqlite3
+import pandas as pd
+import numpy as np
+
 
 import xml.etree.ElementTree as ET
 from urllib.parse import urlparse
@@ -336,6 +338,7 @@ def assign_coords_to_plants(
         plants_csv_path: Path,
         out_path: Path,
         keep_existing_coords: bool = False,
+        max_coord_deviation_km: float | None = None,
 ):
     plz_to_coords_dict = _get_plz_to_lat_lon_mapping(plz_data_path)
 
@@ -348,15 +351,50 @@ def assign_coords_to_plants(
         elif pd.isna(plant["Laengengrad"]) and not pd.isna(plant["Breitengrad"]):
             print(f"Got Breitengrad but not Laengengrad for {plant['EinheitMastrNummer']}, overwriting both.")
 
-    # Vectorized coord assignment for missing values
-    if keep_existing_coords:
+    if keep_existing_coords and max_coord_deviation_km is not None:
+        # Keep existing coords only if within max_coord_deviation_km of PLZ centroid
+        # Fall back to PLZ centroid for missing coords or coords too far from PLZ centroid
+        plz_coords = plants_df["Postleitzahl"].astype(str).map(plz_to_coords_dict)
+        plz_lat = plz_coords.map(lambda x: x[0] if pd.notna(x) else None)
+        plz_lon = plz_coords.map(lambda x: x[1] if pd.notna(x) else None)
+
+        # Compute haversine distance for plants that have existing coords
+        has_coords = plants_df["Breitengrad"].notna() & plants_df["Laengengrad"].notna()
+        has_plz_coords = plz_lat.notna() & plz_lon.notna()
+
+        dist = pd.Series(np.nan, index=plants_df.index)
+        mask = has_coords & has_plz_coords
+        if mask.any():
+            lat1 = np.radians(plants_df.loc[mask, "Breitengrad"].values)
+            lon1 = np.radians(plants_df.loc[mask, "Laengengrad"].values)
+            lat2 = np.radians(plz_lat[mask].values)
+            lon2 = np.radians(plz_lon[mask].values)
+            dlat = lat2 - lat1
+            dlon = lon2 - lon1
+            a = np.sin(dlat / 2) ** 2 + np.cos(lat1) * np.cos(lat2) * np.sin(dlon / 2) ** 2
+            dist[mask] = 2 * 6371 * np.arcsin(np.sqrt(a))
+
+        # Overwrite where coords are missing or too far from PLZ centroid
+        overwrite = ~has_coords | (dist > max_coord_deviation_km)
+        overwrite_with_plz = overwrite & has_plz_coords
+
+        plants_df.loc[overwrite_with_plz, "Breitengrad"] = plz_lat[overwrite_with_plz]
+        plants_df.loc[overwrite_with_plz, "Laengengrad"] = plz_lon[overwrite_with_plz]
+
+        n_kept = (~overwrite & has_coords).sum()
+        n_overwritten = overwrite_with_plz.sum()
+        print(f"  Kept existing coords:      {n_kept:,}")
+        print(f"  Overwritten with PLZ:      {n_overwritten:,}")
+
+    elif keep_existing_coords:
+        # Original behaviour — only fill missing
         missing = pd.isna(plants_df["Breitengrad"]) | pd.isna(plants_df["Laengengrad"])
         coords = plants_df.loc[missing, "Postleitzahl"].astype(str).map(plz_to_coords_dict)
         plants_df.loc[missing, "Breitengrad"] = coords.map(lambda x: x[0] if pd.notna(x) else None)
         plants_df.loc[missing, "Laengengrad"] = coords.map(lambda x: x[1] if pd.notna(x) else None)
 
     else:
-        # Extract coords with plant indices
+        # Overwrite all with PLZ centroids
         coords = plants_df["Postleitzahl"].astype(str).map(plz_to_coords_dict)
         plants_df["Breitengrad"] = coords.map(lambda x: x[0] if pd.notna(x) else None)
         plants_df["Laengengrad"] = coords.map(lambda x: x[1] if pd.notna(x) else None)
