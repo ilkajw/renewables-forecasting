@@ -74,5 +74,6 @@ def task_assign_coords_to_wind_plants(
         plz_data_path=GEONAMES_POSTAL_CODE_DATA,
         plants_csv_path=MASTR_WIND_PLANTS_EFFECTIVE_START_DATE_CSV,
         out_path=MASTR_WIND_PLANTS_EFFECTIVE_START_WITH_COORDS_CSV,
-        keep_existing_coords=True
+        keep_existing_coords=True,
+        max_coord_deviation_km=20,
     )
