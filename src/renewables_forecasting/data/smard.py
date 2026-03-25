@@ -187,6 +187,7 @@ def apply_daylight_mask_to_generation(
     print(f"Loading generation data from {generation_csv_path} ...")
     df = pd.read_csv(generation_csv_path, parse_dates=[time_col])
 
+
     n_before = len(df)
     df_filtered = df[df[time_col].isin(day_times)].copy()
     n_after = len(df_filtered)
@@ -196,3 +197,59 @@ def apply_daylight_mask_to_generation(
 
     df_filtered.to_csv(out_csv_path, index=False)
     print(f"  Saved to: {out_csv_path}")
+
+
+def combine_generation_series(
+        csv_path_1: Path,
+        csv_path_2: Path,
+        out_path: Path,
+        timestamp_ms_col: str = "timestamp_ms",
+        time_col: str = "time",
+        value_col: str = "generation_mwh",
+) -> None:
+    """
+    Combines two SMARD generation CSVs by summing their values aligned on
+    the raw Unix millisecond timestamps, which are unique even at DST
+    transitions where the converted datetime column has duplicate values.
+
+    Parameters
+    ----------
+    csv_path_1, csv_path_2:
+        Paths to the two generation CSVs to combine.
+    out_path:
+        Path to write the combined CSV.
+    timestamp_ms_col:
+        Name of the Unix millisecond timestamp column. Used as the join key.
+    time_col:
+        Name of the converted datetime column. Carried through from csv_path_1.
+    value_col:
+        Name of the generation column to sum.
+    """
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    df1 = pd.read_csv(csv_path_1, dtype={timestamp_ms_col: int})
+    df2 = pd.read_csv(csv_path_2, dtype={timestamp_ms_col: int})
+
+    # Merge on unique Unix millisecond timestamps
+    merged = df1[[timestamp_ms_col, time_col, value_col]].merge(
+        df2[[timestamp_ms_col, value_col]],
+        on=timestamp_ms_col,
+        suffixes=("_1", "_2"),
+        how="inner"
+    )
+
+    merged[value_col] = merged[f"{value_col}_1"] + merged[f"{value_col}_2"]
+    merged = merged[[timestamp_ms_col, time_col, value_col]]
+
+    n_missing = len(df1) - len(merged)
+    if n_missing > 0:
+        print(f"  WARNING: {n_missing} rows in series 1 have no match in series 2")
+
+    print(f"  Combined {len(merged):,} hourly entries")
+    print(f"  First: {merged[time_col].iloc[0]}")
+    print(f"  Last:  {merged[time_col].iloc[-1]}")
+    print(f"  Total generation: {merged[value_col].sum():,.1f} MWh")
+
+    merged.to_csv(out_path, index=False)
+    print(f"  Saved to: {out_path}")
