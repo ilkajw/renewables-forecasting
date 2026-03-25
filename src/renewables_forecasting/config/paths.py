@@ -83,10 +83,13 @@ SMARD_RAW_DATA_DIR = RAW_DATA_DIR / "smard"
 # ── Solar ─────────
 
 SMARD_SOLAR_DATA_DIR_RAW = SMARD_RAW_DATA_DIR / "solar"
-SMARD_SOLAR_GENERATION_SERIES_JSON = SMARD_SOLAR_DATA_DIR_RAW / "smard_solar_generation.json"
-SMARD_SOLAR_GENERATION_SERIES_CSV = SMARD_SOLAR_DATA_DIR_RAW / "smard_solar_generation.json"
-SMARD_SOLAR_GENERATION_SERIES_MASKED_CSV = SMARD_SOLAR_DATA_DIR_RAW / "smard_solar_generation_masked.json"
+SMARD_SOLAR_GENERATION_SERIES_CSV = SMARD_SOLAR_DATA_DIR_RAW / "smard_solar_generation.csv"
+SMARD_SOLAR_GENERATION_SERIES_MASKED_CSV = SMARD_SOLAR_DATA_DIR_RAW / "smard_solar_generation_masked.csv"
 
+SMARD_WIND_DATA_DIR_RAW = SMARD_RAW_DATA_DIR / "wind"
+SMARD_WIND_ONSHORE_GENERATION_SERIES_CSV = SMARD_WIND_DATA_DIR_RAW / "smard_wind_onshore_generation.csv"
+SMARD_WIND_OFFSHORE_GENERATION_SERIES_CSV = SMARD_WIND_DATA_DIR_RAW / "smard_wind_offshore_generation.csv"
+SMARD_WIND_TOTAL_GENERATION_SERIES_CSV = SMARD_WIND_DATA_DIR_RAW / "smard_wind_total_generation.csv"
 
 # ── Geonames postal code data ───────────────────────────────────────────────────────────────
 GEONAMES_POSTAL_CODE_DATA = RAW_DATA_DIR / "geonames/geonames_postal_code_data_DE.zip"
@@ -102,6 +105,10 @@ GRID_REFERENCE_DS_STORE = ERA5_RAW_SOLAR_DATA_DIR / "ssrd/ssrd_2015-01.nc"
 
 # ── Daylight boolean mask ───────────────────────────────────────────────────────────────
 DAYLIGHT_MASK_NETCDF_PATH = PROCESSED_DATA_DIR / "daylight_mask"
+
+
+# ── DWD COSMO REA6 weather data ───────────────────────────────────────────────────────────────
+ANALYSIS_DIR = DATA_DIR / "analysis"
 
 # ── DWD COSMO REA6 weather data ───────────────────────────────────────────────────────────────
 DWD_DATA_DIR_RAW = RAW_DATA_DIR / "dwd"
