@@ -13,8 +13,6 @@ ERA5_SOLAR_VARIABLES = {
 ERA5_WIND_VARIABLES = {
     "u100": "100m_u_component_of_wind",
     "v100": "100m_v_component_of_wind",
-    "t2m": "2m_temperature",
-    "tp": "total_precipitation",
 }
 
 
@@ -45,7 +43,11 @@ MASTR_WIND_VARIABLES = ["NameStromerzeugungseinheit", "EinheitMastrNummer", "Bun
 SMARD_SOLAR_GENERATION_TIMESTAMPS_URL = "https://www.smard.de/app/chart_data/4068/DE/index_hour.json"
 SMARD_SOLAR_GENERATION_URL_TEMPLATE = "https://www.smard.de/app/chart_data/4068/DE/4068_DE_hour_{timestamp}.json"
 
+SMARD_ONSHORE_WIND_GENERATION_TIMESTAMPS_URL = "https://www.smard.de/app/chart_data/4067/DE/index_hour.json"
+SMARD_ONSHORE_WIND_GENERATION_URL_TEMPLATE = "https://www.smard.de/app/chart_data/4067/de/4067_DE_hour_{timestamp}.json"
 
+SMARD_OFFSHORE_WIND_GENERATION_TIMESTAMPS_URL = "https://www.smard.de/app/chart_data/1225/DE/index_hour.json"
+SMARD_OFFSHORE_WIND_GENERATION_URL_TEMPLATE = "https://www.smard.de/app/chart_data/1225/de/1225_DE_hour_{timestamp}.json"
 # ---- Geonames ----
 GEONAMES_POSTAL_CODES_DATA_URL = "https://download.geonames.org/export/zip/DE.zip"
 
