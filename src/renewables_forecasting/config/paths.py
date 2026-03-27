@@ -7,6 +7,7 @@ DATA_DIR = PROJECT_ROOT / "data"
 RAW_DATA_DIR = DATA_DIR / "raw"
 PROCESSED_DATA_DIR = DATA_DIR / "processed"
 FEATURES_DATA_DIR = DATA_DIR / "features"
+PLOTS_DIR = DATA_DIR / "plots"
 
 # ── ERA5 weather data ───────────────────────────────────────────────────────────────
 ERA5_RAW_DATA_DIR = RAW_DATA_DIR / "era5"
@@ -16,11 +17,10 @@ ERA5_PROCESSED_DATA_DIR = PROCESSED_DATA_DIR / "era5"
 # ── Solar ──────────────
 ERA5_RAW_SOLAR_DATA_DIR = ERA5_RAW_DATA_DIR / "solar"
 ERA5_PROCESSED_SOLAR_DATA_DIR = ERA5_PROCESSED_DATA_DIR / "solar"
-ERA5_CET_SOLAR_DATA_DIR = ERA5_PROCESSED_SOLAR_DATA_DIR / "cet"
 ERA5_MASKED_SOLAR_DATA_DIR = ERA5_PROCESSED_SOLAR_DATA_DIR / "daylight_masked"
 
 # ── Wind ──────────────
-ERA5_RAW_WIND_DATA_DIR = ERA5_RAW_DATA_DIR / " wind"
+ERA5_RAW_WIND_DATA_DIR = ERA5_RAW_DATA_DIR / "wind"
 ERA5_PROCESSED_WIND_DATA_DIR = ERA5_PROCESSED_DATA_DIR / "wind"
 
 # For viz
@@ -29,6 +29,7 @@ ERA5_EUROPE_SOLAR_DATA_DIR = ERA5_EUROPE_DIR / "solar"
 ERA5_EUROPE_WIND_DATA_DIR = ERA5_EUROPE_DIR / "wind"
 
 
+NWP_FORECAST_DATA_DIR = RAW_DATA_DIR / "ecmwf_ifs"
 # ── MaStR plant data ───────────────────────────────────────────────────────────────
 
 MASTR_DATA_DIR_RAW = RAW_DATA_DIR / "mastr"
@@ -101,7 +102,8 @@ CAPACITY_GRIDS_DIR = PROCESSED_DATA_DIR / "capacity_grids"
 SOLAR_CAPACITY_GRIDS_ZARR_STORE = CAPACITY_GRIDS_DIR / "solar"
 WIND_CAPACITY_GRIDS_ZARR_STORE = CAPACITY_GRIDS_DIR / "wind"
 
-GRID_REFERENCE_DS_STORE = ERA5_RAW_SOLAR_DATA_DIR / "ssrd/ssrd_2015-01.nc"
+SOLAR_GRID_REFERENCE_DS_STORE = ERA5_RAW_SOLAR_DATA_DIR / "ssrd/ssrd_2015-01.nc"
+WIND_GRID_REFERENCE_DS_STORE = ERA5_RAW_WIND_DATA_DIR / "u100/u100_2015-01.nc"
 
 # ── Daylight boolean mask ───────────────────────────────────────────────────────────────
 DAYLIGHT_MASK_NETCDF_PATH = PROCESSED_DATA_DIR / "daylight_mask"

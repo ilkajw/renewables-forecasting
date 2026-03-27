@@ -2,7 +2,7 @@ from datetime import date
 
 from renewables_forecasting.config.paths import (
     MASTR_WIND_PLANTS_EFFECTIVE_START_WITH_COORDS_CSV,
-    GRID_REFERENCE_DS_STORE,
+    WIND_GRID_REFERENCE_DS_STORE,
     WIND_CAPACITY_GRIDS_ZARR_STORE
 )
 from renewables_forecasting.data.capacity_grids import build_capacity_grids
@@ -17,10 +17,10 @@ def task_build_wind_capacity_grids(
 ):
 
     build_capacity_grids(
-        ref_weather_ds=GRID_REFERENCE_DS_STORE,
+        ref_weather_ds=WIND_GRID_REFERENCE_DS_STORE,  # wind-specific
         plants_csv=MASTR_WIND_PLANTS_EFFECTIVE_START_WITH_COORDS_CSV,
         start_month=date(2015, 1, 1),
-        end_month=date(2025, 12, 1),
+        end_month=date(2025, 12, 1),  # includes whole month of December 2025
         out_dir=WIND_CAPACITY_GRIDS_ZARR_STORE,
     )
 

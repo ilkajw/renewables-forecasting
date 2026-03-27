@@ -2,7 +2,7 @@ from datetime import date
 
 from renewables_forecasting.config.paths import (
     MASTR_SOLAR_PLANTS_EFFECTIVE_START_WITH_COORDS_CSV,
-    GRID_REFERENCE_DS_STORE,
+    SOLAR_GRID_REFERENCE_DS_STORE,
     SOLAR_CAPACITY_GRIDS_ZARR_STORE
 )
 from renewables_forecasting.data.capacity_grids import build_capacity_grids
@@ -17,7 +17,7 @@ def task_build_solar_capacity_grids(
 ):
 
     build_capacity_grids(
-        ref_weather_ds=GRID_REFERENCE_DS_STORE,
+        ref_weather_ds=SOLAR_GRID_REFERENCE_DS_STORE,
         plants_csv=MASTR_SOLAR_PLANTS_EFFECTIVE_START_WITH_COORDS_CSV,
         start_month=date(2015, 1, 1),
         end_month=date(2025, 12, 1),
