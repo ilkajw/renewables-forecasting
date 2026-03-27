@@ -55,11 +55,9 @@ def download_smard_generation(
     contains only the requested data.
 
     Timestamps are stored both as the original Unix milliseconds (for
-    reproducibility and auditability) and as timezone-naive German local time
-    (CET/CEST, Europe/Berlin) for direct alignment with ERA5 and capacity
-    grid data in the pipeline. The timezone is stripped for consistency with
-    ERA5 data stored timezone-naive after convert_era5_utc_to_german_time(),
-    but CET/CEST is the implied timezone throughout.
+    reproducibility and auditability) and as UTC datetime for direct alignment
+    with ERA5 data in the pipeline. The time column is timezone-naive UTC,
+    consistent with ERA5 data which is stored in UTC throughout the pipeline.
 
     Parameters
     ----------
@@ -75,7 +73,7 @@ def download_smard_generation(
         Path to write the output CSV file.
     start:
         Start of the requested period, inclusive. Must be a timezone-naive
-        datetime in German local time, e.g. datetime(2015, 1, 1).
+        datetime in UTC, e.g. datetime(2015, 1, 1).
     end:
         End of the requested period, exclusive. Set to the first moment after
         the last desired entry, e.g. datetime(2026, 1, 1) to include all of
@@ -88,8 +86,8 @@ def download_smard_generation(
         Name for the converted datetime column. Default is 'time'.
     timestamp_ms_col:
         Name for the raw Unix millisecond timestamp column. Default is
-        'timestamp_ms'. Retained for reproducibility so the timezone
-        conversion can always be verified or re-derived.
+        'timestamp_ms'. Retained for reproducibility so the UTC conversion
+        can always be verified or re-derived.
     value_col:
         Name for the generation column. Default is 'generation_mwh'.
     """
@@ -122,17 +120,15 @@ def download_smard_generation(
     # Build DataFrame with raw millisecond timestamps and converted datetimes
     df = pd.DataFrame(series, columns=[timestamp_ms_col, value_col])
 
-    # Convert Unix milliseconds to timezone-naive German local time.
-    # SMARD timestamps are in CET/CEST — convert via UTC then strip timezone
-    # for consistency with ERA5 data in the pipeline.
+    # Convert Unix milliseconds to timezone-naive UTC.
+    # SMARD timestamps are Unix milliseconds (UTC by definition).
+    # Timezone info is stripped for consistency with ERA5 data in the pipeline.
     df[time_col] = (
         pd.to_datetime(df[timestamp_ms_col], unit="ms", utc=True)
-        .dt.tz_convert("Europe/Berlin")
         .dt.tz_localize(None)
     )
 
-    # To be safe for potential in-chunk non-chronological order:
-    # Reorder columns and sort chronologically, to be safe
+    # Reorder columns and sort chronologically
     df = df[[timestamp_ms_col, time_col, value_col]]
     df = df.sort_values(time_col).reset_index(drop=True)
 
