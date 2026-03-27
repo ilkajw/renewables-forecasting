@@ -63,130 +63,6 @@ def download_era5(
 
             d += relativedelta(months=1)
 
-# todo: delete conversion!
-def convert_era5_utc_to_german_time(
-        in_dir: Path,
-        out_dir: Path,
-        variables: List[str],
-        file_pattern: str = "{variable}_{year}-{month:02d}.nc",
-) -> None:
-    """
-    Converts ERA5 NetCDF files from UTC to German local time (CET/CEST,
-    Europe/Berlin) and saves the converted files to out_dir.
-
-    ERA5 data is always in UTC by convention. SMARD generation data and MaStR
-    plant data are in German local time (CET in winter, CEST in summer).
-    Converting ERA5 to German local time ensures all pipeline inputs share
-    the same time axis, avoiding misalignment at the daylight saving
-    transitions in March and October.
-
-    DST transitions produce one 23-hour day in March (clocks spring forward,
-    one hour is skipped) and one 25-hour day in October (clocks fall back,
-    one hour is duplicated). xarray handles this correctly via pandas
-    DatetimeIndex with timezone information.
-
-    Timestamps are stored as timezone-naive in the output NetCDF files since
-    NetCDF does not support timezone-aware timestamps natively. The timezone
-    is documented in the time variable's attributes.
-
-    Files are read from and written to per-variable subdirectories:
-    in_dir/{variable}/ -> out_dir/{variable}/. Years and months are inferred
-    from filenames in the first variable's subdirectory.
-
-    Parameters
-    ----------
-    in_dir:
-        Root directory containing per-variable subdirectories of ERA5 NetCDF
-        files in UTC. Structure: in_dir/{variable}/{variable}_{year}-{month}.nc
-    out_dir:
-        Root directory to write converted files to. Same subdirectory structure
-        as in_dir is created automatically.
-    variables:
-        List of ERA5 variable names to convert, e.g. ['ssrd', 't2m'].
-    file_pattern:
-        Pattern for ERA5 file names within each variable's subdirectory.
-        Must contain {variable}, {year}, {month}.
-        Default: {variable}_{year}-{month:02d}.nc
-    """
-
-    out_dir.mkdir(parents=True, exist_ok=True)
-
-    # Infer years and months from filenames in the first variable's subdir.
-    # All variables are assumed to cover the same years and months.
-    ref_var = variables[0]
-    ref_var_dir = in_dir / ref_var
-
-    years = sorted(set(
-        int(f.stem.split("_")[1].split("-")[0])
-        for f in ref_var_dir.glob(f"{ref_var}_*.nc")
-    ))
-    months = sorted(set(
-        int(f.stem.split("_")[1].split("-")[1])
-        for f in ref_var_dir.glob(f"{ref_var}_*.nc")
-    ))
-
-    print(f"  Inferred years:  {years}")
-    print(f"  Inferred months: {months}")
-    print(f"\nConverting {len(variables)} variable(s) across {len(years)} year(s) "
-          f"to German local time ({GERMAN_TZ}) ...")
-
-    for var in variables:
-        print(f"\n  Variable: {var}")
-
-        # Create output subdirectory for this variable
-        var_out_dir = out_dir / var
-        var_out_dir.mkdir(parents=True, exist_ok=True)
-
-        for year in years:
-            for month in months:
-
-                in_path = in_dir / var / file_pattern.format(variable=var, year=year, month=month)
-                out_path = var_out_dir / file_pattern.format(variable=var, year=year, month=month)
-
-                if not in_path.exists():
-                    print(f"    Skipping {in_path.name} — file not found")
-                    continue
-
-                ds = xr.open_dataset(in_path)
-
-                if "valid_time" in ds.coords and "time" not in ds.coords:
-                    ds = ds.rename({"valid_time": "time"})
-
-                # ERA5 timestamps are timezone-naive UTC by convention.
-                # Localize to UTC first, then convert to German local time.
-                times_utc = pd.DatetimeIndex(ds.time.values)
-
-                if times_utc.tz is None:
-                    # Timezone-naive — assume UTC as per ERA5 convention
-                    times_utc = times_utc.tz_localize("UTC")
-                else:
-                    # Already timezone-aware — convert to UTC to be safe
-                    times_utc = times_utc.tz_convert("UTC")
-
-                # Convert UTC to German local time (CET in winter, CEST in summer).
-                # pandas handles DST transitions automatically:
-                #   March transition:   one hour is skipped (23-hour day)
-                #   October transition: one hour is repeated (25-hour day)
-                times_german = times_utc.tz_convert(GERMAN_TZ)
-
-                # Strip timezone info before writing — NetCDF does not support
-                # timezone-aware timestamps. The timezone is preserved in attrs.
-                ds = ds.assign_coords(
-                    time=("time", times_german.tz_localize(None))
-                )
-                ds.time.attrs["timezone"] = GERMAN_TZ
-                ds.time.attrs["note"] = (
-                    "Timestamps converted from UTC to Europe/Berlin (CET/CEST). "
-                    "Timezone info stripped for NetCDF compatibility but is "
-                    "documented in this attribute."
-                )
-
-                ds.to_netcdf(out_path)
-                print(f"    {in_path.name} -> {out_path.name}  "
-                      f"({times_german[0]} to {times_german[-1]})")
-
-    print(f"\nDone. Converted files saved to: {out_dir.resolve()}")
-
 
 def build_daylight_mask(
         ssrd_dir: Path,
@@ -314,9 +190,8 @@ def apply_daylight_mask_to_era5_variables(
     Run once after build_daylight_mask() and use the output directory as the
     source for all downstream solar model training steps.
 
-    ERA5 data must already be in German local time (i.e. after running
-    convert_era5_utc_to_german_time) before applying the mask, since the mask
-    is built from ssrd data in German local time.
+    ERA5 data must be in UTC time when applying the mask, since the mask
+    is built from ssrd data in UTC time.
 
     Note: do NOT apply this mask to ERA5 variables used for wind generation,
     as wind turbines operate around the clock and the solar daylight mask is
@@ -330,7 +205,7 @@ def apply_daylight_mask_to_era5_variables(
         List of ERA5 variable names to mask, e.g. ['ssrd', 't2m'].
     era5_dir:
         Root directory containing per-variable subdirectories of ERA5 NetCDF
-        files in German local time. Structure: era5_dir/{variable}/files.
+        files in UTC time. Structure: era5_dir/{variable}/files.
     out_dir:
         Root directory to write masked files to. Same per-variable subdirectory
         structure as era5_dir is created automatically.
