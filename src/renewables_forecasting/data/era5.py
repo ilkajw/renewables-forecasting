@@ -9,7 +9,6 @@ from dateutil.relativedelta import relativedelta
 
 from renewables_forecasting.config.paths import ERA5_RAW_DATA_DIR
 from renewables_forecasting.config.data_constants import (
-    GERMAN_TZ,
     GERMANY_LON_MAX,
     GERMANY_LON_MIN,
     GERMANY_LAT_MAX,
@@ -75,7 +74,7 @@ def build_daylight_mask(
     (ssrd) across the full study period and saves it as a NetCDF file for
     reuse across the pipeline.
 
-    All monthly ssrd files in ssrd_dir are concatenated along the time
+    All monthly ssrd files in ssrd_dir are concatenated along the valid_time
     dimension before computing the mask, ensuring the mask covers the full
     study period (e.g. 2015-2025) with year- and month-specific day length
     correctly captured for every individual date.
@@ -99,7 +98,7 @@ def build_daylight_mask(
         Files are discovered via file_pattern glob.
     out_path:
         Path to write the daylight mask NetCDF file. Contains a single boolean
-        variable 'daylight_mask' with dimension (time) covering the full period
+        variable 'daylight_mask' with dimension (valid_time) covering the full period
         spanned by the ssrd files in ssrd_dir.
     buffer_hours:
         Number of zero-irradiance hours to include on each side of the daylight
@@ -137,14 +136,14 @@ def build_daylight_mask(
         window = 2 * buffer_hours + 1
         daylight_extended = (
             daylight
-            .rolling(time=window, center=True, min_periods=1)
+            .rolling(valid_time=window, center=True, min_periods=1)
             .max()
             .astype(bool)
         )
     else:
         daylight_extended = daylight
 
-    n_total = len(daylight_extended.time)
+    n_total = len(daylight_extended.valid_time)
     n_daylight = int(daylight_extended.sum())
     n_night = n_total - n_daylight
     pct = n_daylight / n_total * 100
@@ -220,7 +219,7 @@ def apply_daylight_mask_to_era5_variables(
     # Load mask once and extract daylight timestamps
     print(f"Loading daylight mask from {mask_path} ...")
     mask = xr.open_dataset(mask_path)["daylight_mask"]
-    day_times = mask.time.values[mask.values]
+    day_times = mask.valid_time.values[mask.values]
     n_daylight = len(day_times)
     print(f"  Daylight hours in mask: {n_daylight:,}")
 
@@ -258,17 +257,16 @@ def apply_daylight_mask_to_era5_variables(
                 # Select only daylight hours that fall within this month's
                 # time range — avoids KeyError when day_times spans years
                 # outside this particular file's coverage
-                month_times = pd.DatetimeIndex(ds.time.values)
+                month_times = pd.DatetimeIndex(ds["valid_time"].values)
                 mask_for_month = pd.DatetimeIndex(day_times)
                 overlap = mask_for_month[
                     (mask_for_month >= month_times.min()) &
                     (mask_for_month <= month_times.max())
                     ]
 
-                # Use boolean indexing instead of .sel() to handle duplicate timestamps
-                # that arise from the October DST transition (25-hour day)
-                time_mask = pd.DatetimeIndex(ds.time.values).isin(overlap)
-                ds_filtered = ds.isel(time=time_mask)
+                # Use boolean indexing instead of .sel() for safe timestamp matching
+                time_mask = pd.DatetimeIndex(ds["valid_time"].values).isin(overlap)
+                ds_filtered = ds.isel(valid_time=time_mask)
 
                 ds_filtered.to_netcdf(out_path)
                 print(f"    {in_path.name} -> {out_path.name}  "
@@ -285,7 +283,7 @@ def calculate_wind_speed_from_components(
     """
     Calculates wind speed from u100 and v100 ERA5 wind components using the
     L2 norm: wind_speed = sqrt(u100² + v100²) and saves the result as a
-    new NetCDF variable 'wind_speed_100m' per monthly file.
+    new NetCDF variable 'wind_speed_100' per monthly file.
 
     Both u100 and v100 must already be present in in_dir as per-variable
     subdirectories, i.e. in_dir/u100/ and in_dir/v100/.
@@ -297,12 +295,12 @@ def calculate_wind_speed_from_components(
         files. Structure: in_dir/{variable}/{variable}_{year}-{month}.nc
     out_dir:
         Root directory to write wind speed files to.
-        Structure: out_dir/wind_speed_100m/{wind_speed_100m}_{year}-{month}.nc
+        Structure: out_dir/wind_speed_100/{wind_speed_100}_{year}-{month}.nc
     file_pattern:
         Pattern for ERA5 file names. Default: {variable}_{year}-{month:02d}.nc
     """
 
-    out_var = "wind_speed_100m"
+    out_var = "wind_speed_100"
     var_out_dir = out_dir / out_var
     var_out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -336,11 +334,6 @@ def calculate_wind_speed_from_components(
 
             ds_u = xr.open_dataset(u_path)
             ds_v = xr.open_dataset(v_path)
-
-            if "valid_time" in ds_u.coords and "time" not in ds_u.coords:
-                ds_u = ds_u.rename({"valid_time": "time"})
-            if "valid_time" in ds_v.coords and "time" not in ds_v.coords:
-                ds_v = ds_v.rename({"valid_time": "time"})
 
             u = ds_u["u100"]
             v = ds_v["v100"]
