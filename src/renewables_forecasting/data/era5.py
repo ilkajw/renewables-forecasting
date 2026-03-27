@@ -188,7 +188,6 @@ def convert_era5_utc_to_german_time(
     print(f"\nDone. Converted files saved to: {out_dir.resolve()}")
 
 
-# todo: reimplement!
 def build_daylight_mask(
         ssrd_dir: Path,
         out_path: Path,
@@ -203,7 +202,7 @@ def build_daylight_mask(
     All monthly ssrd files in ssrd_dir are concatenated along the time
     dimension before computing the mask, ensuring the mask covers the full
     study period (e.g. 2015-2025) with year- and month-specific day length
-    and DST transitions correctly captured for every individual date.
+    correctly captured for every individual date.
 
     The mask is True for all hours where any ERA5 grid cell over Germany has
     non-zero irradiance, extended by buffer_hours on each side to include a
@@ -213,15 +212,15 @@ def build_daylight_mask(
     All deep night hours (far from any daylight window) are False and should
     be excluded from training.
 
-    The ssrd data must already be in German local time (i.e. after running
-    convert_era5_utc_to_german_time) so the mask aligns correctly with SMARD
-    generation data which is in CET/CEST.
+    The ssrd data should be in UTC, consistent with the rest of the pipeline.
+    The mask is timezone-agnostic — ssrd > 0 is a physical condition that
+    holds at the same physical moment regardless of timezone representation.
 
     Parameters
     ----------
     ssrd_dir:
-        Directory containing monthly ERA5 ssrd NetCDF files, already converted
-        to German local time. Files are discovered via file_pattern glob.
+        Directory containing monthly ERA5 ssrd NetCDF files in UTC.
+        Files are discovered via file_pattern glob.
     out_path:
         Path to write the daylight mask NetCDF file. Contains a single boolean
         variable 'daylight_mask' with dimension (time) covering the full period
@@ -237,29 +236,21 @@ def build_daylight_mask(
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # Discover and sort all monthly ssrd files in the directory.
-    # Sorting by filename ensures chronological order since filenames contain
-    # year and month in YYYY-MM format.
     files = sorted(ssrd_dir.glob(file_pattern.replace("{year}", "*").replace("{month:02d}", "*")))
 
     if not files:
         raise FileNotFoundError(
             f"No ssrd files found in {ssrd_dir} matching pattern '{file_pattern}'. "
-            f"Ensure convert_era5_utc_to_german_time() has been run first."
+            f"Ensure ERA5 ssrd data has been downloaded first."
         )
 
     print(f"Found {len(files)} monthly ssrd files in {ssrd_dir}")
     print(f"  First: {files[0].name}")
     print(f"  Last:  {files[-1].name}")
 
-    # Concatenate all monthly files along the time dimension.
-    # combine='by_coords' sorts and aligns files by their time coordinate.
     print("\nConcatenating all monthly ssrd files ...")
     ds = xr.open_mfdataset(files, combine="by_coords")
 
-    # Reduce spatial dimensions — True where any grid cell has irradiance > 0.
-    # Using max across lat/lon means the mask is True if *any* part of Germany
-    # has daylight, giving the most inclusive possible window.
     print("Computing spatial maximum of ssrd across all grid cells ...")
     ssrd_max = ds["ssrd"].max(dim=["latitude", "longitude"])
     daylight = ssrd_max > 0
@@ -267,8 +258,6 @@ def build_daylight_mask(
     print(f"Extending daylight window by {buffer_hours} hours on each side ...")
 
     if buffer_hours > 0:
-        # Rolling max over a window of (2 * buffer_hours + 1) centred on each
-        # hour. Any hour within buffer_hours of a daylight hour becomes True.
         window = 2 * buffer_hours + 1
         daylight_extended = (
             daylight
@@ -279,7 +268,6 @@ def build_daylight_mask(
     else:
         daylight_extended = daylight
 
-    # Sanity check: report coverage
     n_total = len(daylight_extended.time)
     n_daylight = int(daylight_extended.sum())
     n_night = n_total - n_daylight
@@ -289,22 +277,21 @@ def build_daylight_mask(
     print(f"  Daylight hours:  {n_daylight:,}  ({pct:.1f}%)")
     print(f"  Night hours:     {n_night:,}  ({100 - pct:.1f}%)")
 
-    # Save as NetCDF
     daylight_extended.name = "daylight_mask"
     daylight_extended.attrs = {
         "description": (
             "Boolean daylight mask derived from ERA5 ssrd over the full study "
             "period. True for hours within the daily solar window plus buffer. "
             "Apply to both ERA5 and SMARD data to exclude night hours. "
-            "Data must be in German local time (Europe/Berlin) before applying."
+            "Timestamps are in UTC, consistent with the pipeline."
         ),
         "buffer_hours": buffer_hours,
         "source_dir": str(ssrd_dir),
         "n_files": len(files),
-        "n_total_hours": n_total,  # <-- add
-        "n_daylight_hours": n_daylight,  # <-- add
-        "n_night_hours": n_night,  # <-- add
-        "pct_daylight": round(pct, 2),  # <-- add
+        "n_total_hours": n_total,
+        "n_daylight_hours": n_daylight,
+        "n_night_hours": n_night,
+        "pct_daylight": round(pct, 2),
     }
 
     daylight_extended.to_dataset(name="daylight_mask").to_netcdf(out_path)
