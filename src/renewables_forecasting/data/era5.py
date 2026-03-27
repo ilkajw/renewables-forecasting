@@ -1,6 +1,7 @@
 import cdsapi
 import xarray as xr
 import pandas as pd
+import numpy as np
 from pathlib import Path
 from datetime import date
 from typing import Dict, List
@@ -62,7 +63,7 @@ def download_era5(
 
             d += relativedelta(months=1)
 
-
+# todo: delete conversion!
 def convert_era5_utc_to_german_time(
         in_dir: Path,
         out_dir: Path,
@@ -187,6 +188,7 @@ def convert_era5_utc_to_german_time(
     print(f"\nDone. Converted files saved to: {out_dir.resolve()}")
 
 
+# todo: reimplement!
 def build_daylight_mask(
         ssrd_dir: Path,
         out_path: Path,
@@ -411,3 +413,85 @@ def apply_daylight_mask_to_era5_variables(
                       f"({time_mask.sum()} daylight hours)")
 
     print(f"\nDone. All masked variables saved to: {out_dir.resolve()}")
+
+
+def calculate_wind_speed_from_components(
+        in_dir: Path,
+        out_dir: Path,
+        file_pattern: str = "{variable}_{year}-{month:02d}.nc",
+) -> None:
+    """
+    Calculates wind speed from u100 and v100 ERA5 wind components using the
+    L2 norm: wind_speed = sqrt(u100² + v100²) and saves the result as a
+    new NetCDF variable 'wind_speed_100m' per monthly file.
+
+    Both u100 and v100 must already be present in in_dir as per-variable
+    subdirectories, i.e. in_dir/u100/ and in_dir/v100/.
+
+    Parameters
+    ----------
+    in_dir:
+        Root directory containing per-variable subdirectories of ERA5 NetCDF
+        files. Structure: in_dir/{variable}/{variable}_{year}-{month}.nc
+    out_dir:
+        Root directory to write wind speed files to.
+        Structure: out_dir/wind_speed_100m/{wind_speed_100m}_{year}-{month}.nc
+    file_pattern:
+        Pattern for ERA5 file names. Default: {variable}_{year}-{month:02d}.nc
+    """
+
+    out_var = "wind_speed_100m"
+    var_out_dir = out_dir / out_var
+    var_out_dir.mkdir(parents=True, exist_ok=True)
+
+    # Infer years and months from u100 subdirectory
+    u100_dir = in_dir / "u100"
+    years = sorted(set(
+        int(f.stem.split("_")[1].split("-")[0])
+        for f in u100_dir.glob("u100_*.nc")
+    ))
+    months = sorted(set(
+        int(f.stem.split("_")[1].split("-")[1])
+        for f in u100_dir.glob("u100_*.nc")
+    ))
+
+    print(f"Computing wind speed from u100 and v100 ...")
+    print(f"  Years:  {years}")
+    print(f"  Months: {months}")
+
+    for year in years:
+        for month in months:
+            u_path = in_dir / "u100" / file_pattern.format(variable="u100", year=year, month=month)
+            v_path = in_dir / "v100" / file_pattern.format(variable="v100", year=year, month=month)
+            out_path = var_out_dir / file_pattern.format(variable=out_var, year=year, month=month)
+
+            if not u_path.exists():
+                print(f"    Skipping {year}-{month:02d} — u100 not found")
+                continue
+            if not v_path.exists():
+                print(f"    Skipping {year}-{month:02d} — v100 not found")
+                continue
+
+            ds_u = xr.open_dataset(u_path)
+            ds_v = xr.open_dataset(v_path)
+
+            if "valid_time" in ds_u.coords and "time" not in ds_u.coords:
+                ds_u = ds_u.rename({"valid_time": "time"})
+            if "valid_time" in ds_v.coords and "time" not in ds_v.coords:
+                ds_v = ds_v.rename({"valid_time": "time"})
+
+            u = ds_u["u100"]
+            v = ds_v["v100"]
+
+            wind_speed = np.sqrt(u ** 2 + v ** 2)
+            wind_speed.name = out_var
+            wind_speed.attrs = {
+                "units": "m s-1",
+                "long_name": "Wind speed at 100m derived from u100 and v100 components",
+                "description": "sqrt(u100^2 + v100^2)"
+            }
+
+            wind_speed.to_dataset(name=out_var).to_netcdf(out_path)
+            print(f"    {year}-{month:02d} -> {out_path.name}")
+
+    print(f"\nDone. Wind speed files saved to: {var_out_dir.resolve()}")
