@@ -151,12 +151,10 @@ def apply_daylight_mask_to_generation(
     Applies a precomputed daylight mask to SMARD generation data stored as a
     CSV, keeping only rows within the daylight window and discarding night hours.
 
-    Both the generation CSV and the daylight mask must be in German local time
-    (CET/CEST, Europe/Berlin) for the mask to align correctly. The generation
-    CSV time column should have been produced by parse_smard_gen_json_to_csv()
-    which converts SMARD timestamps to timezone-naive German local time. The
-    daylight mask is built from ERA5 ssrd data also converted to German local
-    time by convert_era5_utc_to_german_time().
+    Both the generation CSV and the daylight mask must be in UTC timefor the mask to
+    align correctly. The generation CSV time column should have been produced by
+    download_smard_generation() which converts SMARD timestamps to timezone-naive UTC.
+    The daylight mask is built from ERA5 ssrd data coming in naive UTC.
 
     Note: this function is intended for solar generation only. Wind generation
     operates around the clock and should not have night hours masked out.
