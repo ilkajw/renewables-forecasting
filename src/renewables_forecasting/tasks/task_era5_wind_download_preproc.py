@@ -4,13 +4,11 @@ from renewables_forecasting.config.data_sources import ERA5_WIND_VARIABLES
 from renewables_forecasting.config.data_constants import WIND_LAT_MAX
 from renewables_forecasting.config.paths import (
     ERA5_RAW_WIND_DATA_DIR,
-    ERA5_PROCESSED_WIND_DATA_UTC_DIR,
-    ERA5_PROCESSED_WIND_DATA_CET_DIR
+    ERA5_PROCESSED_WIND_DATA_DIR
 )
 from renewables_forecasting.data.era5 import (
     download_era5,
     calculate_wind_speed_from_components,
-    convert_era5_utc_to_german_time
 )
 
 
@@ -36,13 +34,14 @@ def task_download_era5_wind(
 
 def task_calculate_wind_speed(
         depends_on=ERA5_RAW_WIND_DATA_DIR / ".complete",
-        produces=ERA5_PROCESSED_WIND_DATA_UTC_DIR / ".complete"
+        produces=ERA5_PROCESSED_WIND_DATA_DIR / ".complete"
 ):
     calculate_wind_speed_from_components(
         in_dir=ERA5_RAW_WIND_DATA_DIR,
-        out_dir=ERA5_PROCESSED_WIND_DATA_UTC_DIR,
+        out_dir=ERA5_PROCESSED_WIND_DATA_DIR,
         file_pattern="{variable}_{year}-{month:02d}.nc",
     )
 
-    (ERA5_PROCESSED_WIND_DATA_UTC_DIR / ".complete").touch()
+    # todo: this might become inconsistent if more functions write to proc wind dir
+    (ERA5_PROCESSED_WIND_DATA_DIR / ".complete").touch()
 
