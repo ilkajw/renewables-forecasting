@@ -9,27 +9,35 @@ PROCESSED_DATA_DIR = DATA_DIR / "processed"
 FEATURES_DATA_DIR = DATA_DIR / "features"
 PLOTS_DIR = DATA_DIR / "plots"
 
+SOLAR_FEATURES_DIR = FEATURES_DATA_DIR / "solar"
+WIND_FEATURES_DIR = FEATURES_DATA_DIR / "wind"
+
+# ── Cyclical time features ──────────────────────────────────────────────────────────
+
+CYCLICAL_TIME_FEATURES_CSV = PROCESSED_DATA_DIR / "time"
+
 # ── ERA5 weather data ───────────────────────────────────────────────────────────────
 ERA5_RAW_DATA_DIR = RAW_DATA_DIR / "era5"
 ERA5_PROCESSED_DATA_DIR = PROCESSED_DATA_DIR / "era5"
 
-
-# ── Solar ──────────────
+# ── Solar ─────────
 ERA5_RAW_SOLAR_DATA_DIR = ERA5_RAW_DATA_DIR / "solar"
 ERA5_PROCESSED_SOLAR_DATA_DIR = ERA5_PROCESSED_DATA_DIR / "solar"
 ERA5_MASKED_SOLAR_DATA_DIR = ERA5_PROCESSED_SOLAR_DATA_DIR / "daylight_masked"
 
-# ── Wind ──────────────
+# ── Wind ──────────
 ERA5_RAW_WIND_DATA_DIR = ERA5_RAW_DATA_DIR / "wind"
 ERA5_PROCESSED_WIND_DATA_DIR = ERA5_PROCESSED_DATA_DIR / "wind"
 
-# For viz
+# ── Europe for viz ──────
 ERA5_EUROPE_DIR = ERA5_RAW_DATA_DIR / "europe"
 ERA5_EUROPE_SOLAR_DATA_DIR = ERA5_EUROPE_DIR / "solar"
 ERA5_EUROPE_WIND_DATA_DIR = ERA5_EUROPE_DIR / "wind"
 
-
+# ── NWP data ──────
 NWP_FORECAST_DATA_DIR = RAW_DATA_DIR / "ecmwf_ifs"
+
+
 # ── MaStR plant data ───────────────────────────────────────────────────────────────
 
 MASTR_DATA_DIR_RAW = RAW_DATA_DIR / "mastr"
@@ -73,7 +81,7 @@ MASTR_WIND_PLANTS_REJECTED_CSV = MASTR_DATA_DIR_PROCESSED / \
 # Filtered wind plants data with added coords
 MASTR_WIND_PLANTS_EFFECTIVE_START_WITH_COORDS_CSV = MASTR_DATA_DIR_PROCESSED / \
                         f"wind/einheiten_wind_{MASTR_GESAMTDATENUEBERSICHT_VERSION}_comm_date_resolved_with_coords.csv"
-MASTR_SOLAR_PLANTS_EFFECTIVE_START_WITH_COORDS_SQLITE = MASTR_DATA_DIR_PROCESSED / \
+MASTR_WIND_PLANTS_EFFECTIVE_START_WITH_COORDS_SQLITE = MASTR_DATA_DIR_PROCESSED / \
                         f"wind/einheiten_wind_{MASTR_GESAMTDATENUEBERSICHT_VERSION}_comm_date_resolved_with_coords.db"
 
 
@@ -92,11 +100,14 @@ SMARD_WIND_ONSHORE_GENERATION_SERIES_CSV = SMARD_WIND_DATA_DIR_RAW / "smard_wind
 SMARD_WIND_OFFSHORE_GENERATION_SERIES_CSV = SMARD_WIND_DATA_DIR_RAW / "smard_wind_offshore_generation.csv"
 SMARD_WIND_TOTAL_GENERATION_SERIES_CSV = SMARD_WIND_DATA_DIR_RAW / "smard_wind_total_generation.csv"
 
+
 # ── Geonames postal code data ───────────────────────────────────────────────────────────────
+
 GEONAMES_POSTAL_CODE_DATA = RAW_DATA_DIR / "geonames/geonames_postal_code_data_DE.zip"
 
 
 # ── Capacity grids ───────────────────────────────────────────────────────────────
+
 CAPACITY_GRIDS_DIR = PROCESSED_DATA_DIR / "capacity_grids"
 
 SOLAR_CAPACITY_GRIDS_ZARR_STORE = CAPACITY_GRIDS_DIR / "solar"
@@ -106,10 +117,12 @@ SOLAR_GRID_REFERENCE_DS_STORE = ERA5_RAW_SOLAR_DATA_DIR / "ssrd/ssrd_2015-01.nc"
 WIND_GRID_REFERENCE_DS_STORE = ERA5_RAW_WIND_DATA_DIR / "u100/u100_2015-01.nc"
 
 # ── Daylight boolean mask ───────────────────────────────────────────────────────────────
+
 DAYLIGHT_MASK_NETCDF_PATH = PROCESSED_DATA_DIR / "daylight_mask"
 
 
 # ── DWD COSMO REA6 weather data ───────────────────────────────────────────────────────────────
+
 ANALYSIS_DIR = DATA_DIR / "analysis"
 
 # ── DWD COSMO REA6 weather data ───────────────────────────────────────────────────────────────
@@ -117,14 +130,14 @@ DWD_DATA_DIR_RAW = RAW_DATA_DIR / "dwd"
 DWD_DATA_DIR_PROCESSED = PROCESSED_DATA_DIR / "dwd"
 DWD_DATA_DIR_FEATURES = FEATURES_DATA_DIR / "dwd"
 
-# Solar
+# ── Solar ────
 DWD_SOLAR_DATA_DIR_RAW = DWD_DATA_DIR_RAW / "solar"
 DWD_SOLAR_DATA_DIR_PROCESSED = DWD_DATA_DIR_PROCESSED / "solar"
 DWD_SOLAR_DATA_DIR_FEATURES = DWD_DATA_DIR_FEATURES / "solar"
 
-# Wind
+# ── Wind ────
 DWD_WIND_DATA_DIR_RAW = DWD_DATA_DIR_RAW / "wind"
 DWD_WIND_DATA_DIR_FEATURES = DWD_DATA_DIR_FEATURES / "wind"
 
-# Regrid
+# ── Regrid ────
 TARGET_GRID_ZARR_STORE = PROCESSED_DATA_DIR / "target_grid"  # <-- obsolete with era5 data
