@@ -35,7 +35,7 @@ def build_cyclical_time_features(
     times = pd.date_range(start=start, end=end, freq="h")
 
     day_of_year = times.day_of_year
-    days_in_year = times.is_leap_year.map({True: 366, False: 365})
+    days_in_year = np.where(times.is_leap_year, 366, 365)
     hour_of_day = times.hour
 
     df = pd.DataFrame({
