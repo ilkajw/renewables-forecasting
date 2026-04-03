@@ -1,0 +1,32 @@
+model:
+  # ── Input ────────────────────────────────────────────────────────────────────
+  in_channels: 3          # ssrd, t2m, capacity
+  n_cyclical_features: 4  # doy_sin, doy_cos, hod_sin, hod_cos
+
+  # ── Conv blocks ──────────────────────────────────────────────────────────────
+  conv_filters: [16, 32, 64]
+  kernel_size: 3
+  stride: 1
+  padding: 1
+  use_batch_norm: false
+  activation: relu
+
+  # ── Spatial pooling ───────────────────────────────────────────────────────────
+  pooling: global_average
+
+  # ── Dense head ───────────────────────────────────────────────────────────────
+  dense_hidden: [128, 64]
+  dropout: 0.2
+
+  # ── Output mode ──────────────────────────────────────────────────────────────
+  # false: unbounded scalar MWh output (use with option 1 capacity channel)
+  # true:  sigmoid output in [0,1] capacity factor (use with option 2 capacity channel)
+  #        multiply by total_capacity in training loop to reconstruct MWh
+  output_capacity_factor: false
+
+training:
+  learning_rate: 1.0e-3
+  batch_size: 32
+  max_epochs: 150
+  optimizer: adam
+  weight_decay:  0.0 # 1.0e-4  # L2 regularisation — set to 0.0 to disable

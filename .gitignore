@@ -15,7 +15,6 @@ venv/
 
 # Data and model artifacts
 /data/
-models/
 reports/
 
 # Jupyter
