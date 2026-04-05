@@ -99,18 +99,18 @@ def _compute_normalization_stats(
     -------
     DataFrame with columns: channel, mean, std, min, max.
     """
-    train_features = features_np[train_mask]  # (train_hours, channels, lat, lon)
+    train_features = features_np[train_mask]
 
-    channel_mean = np.nanmean(train_features, axis=(0, 2, 3))  # (C,)
-    channel_std = np.nanstd(train_features, axis=(0, 2, 3))    # (C,)
+    channel_mean = np.nanmean(train_features, axis=(0, 2, 3))
+    channel_std = np.nanstd(train_features, axis=(0, 2, 3))
     channel_std = np.where(channel_std == 0, 1.0, channel_std)
-    channel_min = np.nanmin(train_features, axis=(0, 2, 3))    # (C,)
-    channel_max = np.nanmax(train_features, axis=(0, 2, 3))    # (C,)
+    channel_min = np.nanmin(train_features, axis=(0, 2, 3))
+    channel_max = np.nanmax(train_features, axis=(0, 2, 3))
 
     for ch, mu, sigma, mn, mx in zip(
             channel_names, channel_mean, channel_std, channel_min, channel_max
     ):
-        print(f"    {ch:<20}  mean={mu:>12.4f}  std={sigma:>12.4f}  "
+        print(f"    {ch:<30}  mean={mu:>12.4f}  std={sigma:>12.4f}  "
               f"min={mn:>12.4f}  max={mx:>12.4f}")
 
     return pd.DataFrame({
@@ -173,6 +173,7 @@ def build_feature_dataset(
         capacity_unit_divisor: float = 1.0,
         capacity_as_spatial_distribution: bool = False,
         capacity_as_spatiotemporal_distribution: bool = False,
+        capacity_weighted_weather: bool = False,
         normalize_weather: str = "none",
         normalize_capacity: str = "none",
         time_col: str = "time",
@@ -191,25 +192,47 @@ def build_feature_dataset(
 
     ── Capacity channel modes ────────────────────────────────────────────────────
 
-    Three mutually exclusive modes control how the capacity channel is expressed.
-    capacity_as_spatial_distribution and capacity_as_spatiotemporal_distribution
-    cannot both be True — a ValueError is raised if attempted.
+    Four mutually exclusive modes control how capacity information enters the
+    feature dataset. At most one of the four boolean flags can be True.
 
-    Option 1 — raw (both False, default):
-        Absolute capacity values after capacity_unit_divisor is applied.
+    Option 1 — raw (all False, default):
+        Capacity channel contains absolute values after capacity_unit_divisor
+        is applied. Weather channels are unchanged.
 
     Option 2 — spatial distribution (capacity_as_spatial_distribution=True):
-        Each cell's share of total installed capacity for that hour:
+        Capacity channel is each cell's share of total installed capacity for
+        that hour:
             capacity[t, i, j] = P[t, i, j] / sum_{i,j} P[t, i, j]
         Values sum to 1 across lat/lon per hour. Absolute growth is removed —
-        recoverable only via total_cap_per_t.csv which is saved alongside.
+        recoverable only via total_cap_per_t.csv saved alongside.
 
     Option 3 — spatiotemporal distribution (capacity_as_spatiotemporal_distribution=True):
-        Each cell's value divided by the global sum over ALL training time
-        steps and ALL grid cells:
+        Capacity channel is each cell's value divided by the global sum over
+        ALL training time steps and ALL grid cells:
             capacity[t, i, j] = P[t, i, j] / sum_{t_train} sum_{i,j} P[t, i, j]
         Denominator computed on training data only for consistency.
         total_cap_per_t.csv saved for potential future use.
+
+    Option 4 — capacity-weighted weather (capacity_weighted_weather=True):
+        Inspired by Lindas et al. Each weather channel is multiplied
+        elementwise by the spatiotemporal capacity weight:
+            weather_weighted[t, i, j] = weather[t, i, j] * w[t, i, j]
+        where w[t, i, j] = P[t, i, j] / sum_{t_train} sum_{i,j} P[t, i, j]
+        (training-only spatiotemporal weights).
+        No separate capacity channel is included — capacity information is
+        fully embedded in the weighted weather channels. Channel names are
+        suffixed with '_cap_weighted', e.g. 'ssrd_cap_weighted'.
+        normalize_capacity is ignored in this mode.
+        total_cap_per_t.csv is saved for potential use at inference time.
+
+        Normalization compatibility:
+            "zscore" — recommended. The weighted channels have very small
+                       absolute values (weather magnitude × tiny weights),
+                       making z-score normalization practically necessary
+                       for stable training.
+            "minmax" — compatible but less robust to extreme events.
+            "none"   — not recommended. Raw weighted values are very small
+                       and may cause numerical issues during training.
 
     ── Normalization ─────────────────────────────────────────────────────────────
 
@@ -220,12 +243,10 @@ def build_feature_dataset(
 
     All four statistics (mean, std, min, max) are always computed from the
     training split and saved to normalization_stats.csv regardless of which
-    method is chosen, so they remain available for inference time.
+    method is chosen.
 
-    Note: normalize_capacity is applied after the capacity channel mode
-    transformation. For spatial/spatiotemporal distributions the values are
-    already on a natural bounded scale — normalize_capacity="none" is usually
-    appropriate in those cases.
+    normalize_capacity is ignored when capacity_weighted_weather=True since
+    there is no separate capacity channel.
 
     ── Output layout ─────────────────────────────────────────────────────────────
         features.zarr           — stacked grids (time, channels, lat, lon)
@@ -234,7 +255,7 @@ def build_feature_dataset(
         cyclical_features.csv   — sin/cos time encodings per timestamp
         splits.csv              — train/val/test split label per timestamp
 
-        Options 2 and 3 only:
+        Options 2, 3 and 4 only:
         total_cap_per_t.csv     — total installed capacity scalar per timestamp
 
     Parameters
@@ -243,7 +264,8 @@ def build_feature_dataset(
         Root directory of ERA5 data with per-variable subdirectories.
     era5_variables:
         Ordered list of ERA5 variable names to stack as channels.
-        The capacity channel is always appended last as 'capacity'.
+        In options 1-3 the capacity channel is always appended last as
+        'capacity'. In option 4 channels are named '{var}_cap_weighted'.
     capacity_store_dir:
         Directory containing monthly capacity Zarr stores.
     smard_csv_path:
@@ -259,19 +281,22 @@ def build_feature_dataset(
     capacity_unit_divisor:
         Divisor applied to raw capacity values (kW) before processing.
         Default 1.0 (no conversion). Pass 1000.0 for kW → MW.
-        Has no effect on spatial/spatiotemporal distributions.
+        Has no effect on distributions or weighted weather.
     capacity_as_spatial_distribution:
-        If True, capacity channel is per-hour spatial distribution.
-        Mutually exclusive with capacity_as_spatiotemporal_distribution.
+        Option 2. Mutually exclusive with all other capacity modes.
     capacity_as_spatiotemporal_distribution:
-        If True, capacity channel is normalised by global training sum.
-        Mutually exclusive with capacity_as_spatial_distribution.
+        Option 3. Mutually exclusive with all other capacity modes.
+    capacity_weighted_weather:
+        Option 4. Mutually exclusive with all other capacity modes.
+        normalize_capacity is ignored when this is True.
     normalize_weather:
-        Normalization method for ERA5 weather channels.
-        One of "none", "zscore", "minmax". Default "none".
+        Normalization method for weather channels (or weighted weather
+        channels in option 4). One of "none", "zscore", "minmax".
+        Default "none". zscore strongly recommended for option 4.
     normalize_capacity:
-        Normalization method for the capacity channel.
-        One of "none", "zscore", "minmax". Default "none".
+        Normalization method for the capacity channel (options 1-3 only).
+        Ignored in option 4. One of "none", "zscore", "minmax".
+        Default "none".
     time_col:
         Name of the datetime column in input CSVs. Default: 'time'.
     value_col:
@@ -280,15 +305,23 @@ def build_feature_dataset(
 
     # ── Validate parameters ────────────────────────────────────────────────────
 
-    if capacity_as_spatial_distribution and capacity_as_spatiotemporal_distribution:
+    capacity_modes = [
+        capacity_as_spatial_distribution,
+        capacity_as_spatiotemporal_distribution,
+        capacity_weighted_weather,
+    ]
+    if sum(capacity_modes) > 1:
         raise ValueError(
-            "capacity_as_spatial_distribution and capacity_as_spatiotemporal_distribution "
-            "are mutually exclusive — at most one can be True."
+            "capacity_as_spatial_distribution, capacity_as_spatiotemporal_distribution "
+            "and capacity_weighted_weather are mutually exclusive — at most one can be True."
         )
     if normalize_weather not in _VALID_NORM_OPTIONS:
         raise ValueError(f"normalize_weather must be one of {_VALID_NORM_OPTIONS}")
     if normalize_capacity not in _VALID_NORM_OPTIONS:
         raise ValueError(f"normalize_capacity must be one of {_VALID_NORM_OPTIONS}")
+    if capacity_weighted_weather and normalize_capacity != "none":
+        print("  WARNING: normalize_capacity is ignored when capacity_weighted_weather=True "
+              "— there is no separate capacity channel.")
 
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -333,9 +366,7 @@ def build_feature_dataset(
     print(f"\n  Total capacity range: "
           f"{total_capacity_hourly.min():.1f} — {total_capacity_hourly.max():.1f} {cap_unit}")
 
-    # ── Align timestamps (needed before spatiotemporal sum) ───────────────────
-    # Load SMARD and cyclical here so we can compute train_mask before
-    # building the capacity channel — needed for option 3 training-only sum.
+    # ── Align timestamps ───────────────────────────────────────────────────────
 
     print("\nLoading SMARD target ...")
     df_target = pd.read_csv(smard_csv_path)
@@ -361,7 +392,6 @@ def build_feature_dataset(
     era5_time_to_idx = pd.Series(np.arange(len(hourly_times)), index=hourly_times)
     feature_indices = era5_time_to_idx.loc[common_times].values
 
-    # Compute train mask on common_times — needed for option 3 and norm stats
     years = common_times.year
     train_mask = years <= train_end_year
     val_mask = (years > train_end_year) & (years <= val_end_year)
@@ -372,29 +402,58 @@ def build_feature_dataset(
     print(f"    Val   ({train_end_year + 1} – {val_end_year}): {val_mask.sum():>8,} hours")
     print(f"    Test  (> {val_end_year}):      {test_mask.sum():>8,} hours")
 
-    # ── Build capacity channel ─────────────────────────────────────────────────
+    # ── Build capacity channel / weighted weather ──────────────────────────────
+
+    spatiotemporal_sum = None
 
     if capacity_as_spatial_distribution:
+        # Option 2: per-hour spatial distribution
         safe_total = np.where(total_capacity_hourly > 0, total_capacity_hourly, 1.0)
         capacity_channel = (
             capacity_hourly / safe_total[:, None, None]
         ).astype(np.float32)
         print(f"\n  Capacity channel: per-hour spatial distribution (cell / total_t)")
         print(f"  Value range: {capacity_channel.min():.6f} — {capacity_channel.max():.6f}")
-        spatiotemporal_sum = None
+        all_channels = era5_variables + ["capacity"]
+        all_arrays = era5_arrays + [capacity_channel]
+        del capacity_channel
 
     elif capacity_as_spatiotemporal_distribution:
-        # Sum over training timestamps only — consistent with train-only norm stats
+        # Option 3: spatiotemporal distribution — training sum only
         train_capacity = capacity_hourly[feature_indices[train_mask]]
         spatiotemporal_sum = float(train_capacity.sum())
         capacity_channel = (capacity_hourly / spatiotemporal_sum).astype(np.float32)
         print(f"\n  Capacity channel: spatiotemporal distribution (cell / train_sum)")
         print(f"  Training spatiotemporal sum: {spatiotemporal_sum:.4f} {cap_unit}·hours")
         print(f"  Value range: {capacity_channel.min():.8f} — {capacity_channel.max():.8f}")
+        all_channels = era5_variables + ["capacity"]
+        all_arrays = era5_arrays + [capacity_channel]
+        del capacity_channel
+
+    elif capacity_weighted_weather:
+        # Option 4: capacity-weighted weather (Lindas et al. approach)
+        # Compute spatiotemporal weights from training data only
+        train_capacity = capacity_hourly[feature_indices[train_mask]]
+        spatiotemporal_sum = float(train_capacity.sum())
+        weights = (capacity_hourly / spatiotemporal_sum).astype(np.float32)
+        print(f"\n  Capacity-weighted weather mode (Lindas et al.)")
+        print(f"  Training spatiotemporal sum: {spatiotemporal_sum:.4f} {cap_unit}·hours")
+        print(f"  Weight range: {weights.min():.8f} — {weights.max():.8f}")
+
+        # Multiply each weather channel by the capacity weights
+        weighted_arrays = []
+        for arr in era5_arrays:
+            weighted_arrays.append((arr * weights).astype(np.float32))
+        del weights
+
+        all_channels = [f"{var}_cap_weighted" for var in era5_variables]
+        all_arrays = weighted_arrays
+        del weighted_arrays
 
     else:
-        capacity_channel = capacity_hourly
-        spatiotemporal_sum = None
+        # Option 1: absolute capacity values
+        all_channels = era5_variables + ["capacity"]
+        all_arrays = era5_arrays + [capacity_hourly]
         print(f"\n  Capacity channel: absolute values ({cap_unit})")
 
     del capacity_hourly
@@ -402,10 +461,8 @@ def build_feature_dataset(
     # ── Stack all channels → (time, channels, lat, lon) ───────────────────────
 
     print("\nStacking channels ...")
-    all_channels = era5_variables + ["capacity"]
-    all_arrays = era5_arrays + [capacity_channel]
     features_np = np.stack(all_arrays, axis=1)  # (time, C, lat, lon)
-    del all_arrays, era5_arrays, capacity_channel
+    del all_arrays, era5_arrays
 
     # Filter to common timestamps
     features_np = features_np[feature_indices]
@@ -418,26 +475,36 @@ def build_feature_dataset(
     total_capacity_aligned = total_capacity_hourly[feature_indices]
     cyclical_aligned = df_cyclical.loc[common_times]
 
-    # ── Normalization stats (always computed from training split) ──────────────
+    # ── Normalization stats ────────────────────────────────────────────────────
 
     print("\nComputing normalization statistics from training data ...")
     norm_df = _compute_normalization_stats(features_np, all_channels, train_mask)
 
     # ── Apply normalization ────────────────────────────────────────────────────
 
-    weather_indices = list(range(len(era5_variables)))
-    capacity_index = len(era5_variables)  # capacity is always last channel
+    if capacity_weighted_weather:
+        # In weighted weather mode all channels are weather-derived — normalize all
+        all_indices = list(range(len(all_channels)))
+        if normalize_weather != "none":
+            print(f"\nNormalizing capacity-weighted weather channels ({normalize_weather}) ...")
+            _apply_normalization(features_np, all_indices, norm_df, all_channels, normalize_weather)
+        else:
+            print("  WARNING: normalize_weather='none' with capacity_weighted_weather=True. "
+                  "Raw weighted values are very small — zscore normalization is recommended.")
+    else:
+        weather_indices = list(range(len(era5_variables)))
+        capacity_index = len(era5_variables)
 
-    if normalize_weather != "none":
-        print(f"\nNormalizing weather channels ({normalize_weather}) ...")
-        _apply_normalization(
-            features_np, weather_indices, norm_df, all_channels, normalize_weather
-        )
-    if normalize_capacity != "none":
-        print(f"\nNormalizing capacity channel ({normalize_capacity}) ...")
-        _apply_normalization(
-            features_np, [capacity_index], norm_df, all_channels, normalize_capacity
-        )
+        if normalize_weather != "none":
+            print(f"\nNormalizing weather channels ({normalize_weather}) ...")
+            _apply_normalization(
+                features_np, weather_indices, norm_df, all_channels, normalize_weather
+            )
+        if normalize_capacity != "none":
+            print(f"\nNormalizing capacity channel ({normalize_capacity}) ...")
+            _apply_normalization(
+                features_np, [capacity_index], norm_df, all_channels, normalize_capacity
+            )
 
     if normalize_weather == "none" and normalize_capacity == "none":
         print("  No normalization applied — all channels saved raw.")
@@ -446,7 +513,17 @@ def build_feature_dataset(
 
     def _channel_transform_description(ch: str) -> str:
         parts = []
-        if ch == "capacity":
+        if capacity_weighted_weather:
+            parts.append(
+                f"capacity-weighted: {ch.replace('_cap_weighted', '')} × "
+                f"spatiotemporal_weight (train_sum={spatiotemporal_sum:.4f} {cap_unit}·hours)"
+            )
+            parts.append(
+                f"{normalize_weather} normalized (fit on train)"
+                if normalize_weather != "none"
+                else "not normalized"
+            )
+        elif ch == "capacity":
             if capacity_as_spatial_distribution:
                 parts.append("per-hour spatial distribution: cell / sum_{i,j} P[t]")
             elif capacity_as_spatiotemporal_distribution:
@@ -484,6 +561,8 @@ def build_feature_dataset(
         cap_channel_mode = "spatial_distribution"
     elif capacity_as_spatiotemporal_distribution:
         cap_channel_mode = "spatiotemporal_distribution"
+    elif capacity_weighted_weather:
+        cap_channel_mode = "capacity_weighted_weather"
     else:
         cap_channel_mode = "absolute"
 
@@ -498,10 +577,10 @@ def build_feature_dataset(
         "capacity_unit": cap_unit,
         "target": "raw_generation_mwh",
         "normalize_weather": normalize_weather,
-        "normalize_capacity": normalize_capacity,
+        "normalize_capacity": normalize_capacity if not capacity_weighted_weather else "n/a",
         **{f"transform_{ch}": desc for ch, desc in channel_transforms.items()},
     }
-    if capacity_as_spatiotemporal_distribution:
+    if capacity_as_spatiotemporal_distribution or capacity_weighted_weather:
         attrs["capacity_spatiotemporal_sum"] = spatiotemporal_sum
         attrs["capacity_spatiotemporal_sum_unit"] = f"{cap_unit}·hours"
 
@@ -528,7 +607,9 @@ def build_feature_dataset(
     target_df.to_csv(out_dir / "target.csv", index=False)
     print(f"  target.csv          → {out_dir / 'target.csv'}")
 
-    if capacity_as_spatial_distribution or capacity_as_spatiotemporal_distribution:
+    # total_cap_per_t.csv — saved in options 2, 3 and 4
+    if capacity_as_spatial_distribution or capacity_as_spatiotemporal_distribution \
+            or capacity_weighted_weather:
         total_cap_col = f"total_capacity_{cap_unit.lower()}"
         total_cap_df = pd.DataFrame({
             time_col: common_times,
