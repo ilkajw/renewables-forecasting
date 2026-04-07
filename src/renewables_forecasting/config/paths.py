@@ -10,6 +10,10 @@ FEATURES_DATA_DIR = DATA_DIR / "features"
 PLOTS_DIR = DATA_DIR / "plots"
 
 SOLAR_FEATURES_DIR = FEATURES_DATA_DIR / "solar"
+SOLAR_FEATURES_OPT1_DIR = SOLAR_FEATURES_DIR / "all_absolute",
+SOLAR_FEATURES_OPT2_DIR = SOLAR_FEATURES_DIR / "spatially_normalised_caps",
+SOLAR_FEATURES_OPT3_DIR = SOLAR_FEATURES_DIR / "spatiotemporally_normalised_caps",
+SOLAR_FEATURES_OPT4_DIR = SOLAR_FEATURES_DIR / "spatiotemporal_caps_weighted_weather",
 WIND_FEATURES_DIR = FEATURES_DATA_DIR / "wind"
 
 # ── Cyclical time features ──────────────────────────────────────────────────────────
@@ -140,4 +144,4 @@ DWD_WIND_DATA_DIR_RAW = DWD_DATA_DIR_RAW / "wind"
 DWD_WIND_DATA_DIR_FEATURES = DWD_DATA_DIR_FEATURES / "wind"
 
 # ── Regrid ────
-TARGET_GRID_ZARR_STORE = PROCESSED_DATA_DIR / "target_grid"  # <-- obsolete with era5 data
+TARGET_GRID_ZARR_STORE = PROCESSED_DATA_DIR / "target_grid"  # obsolete with era5 data
