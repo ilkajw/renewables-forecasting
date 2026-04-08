@@ -41,6 +41,7 @@ def _build_dense_head(
         hidden_sizes: List[int],
         dropout: float,
         activation: str,
+        output_sigmoid: bool = False
 ) -> nn.Sequential:
     """
     Builds the dense head that takes the concatenated CNN output and cyclical
@@ -59,6 +60,8 @@ def _build_dense_head(
         ])
         current_in = hidden
     layers.append(nn.Linear(current_in, 1))
+    if output_sigmoid:
+        layers.append(nn.Sigmoid())
     return nn.Sequential(*layers)
 
 
@@ -132,6 +135,7 @@ class GenerationCNN(nn.Module):
             hidden_sizes=config.dense_hidden,
             dropout=config.dropout,
             activation=config.activation,
+            output_sigmoid=config.output_capacity_factor
         )
 
         self.config = config
