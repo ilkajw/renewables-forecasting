@@ -175,6 +175,7 @@ def train(
             # Capacity factor mode: reconstruct MWh before loss
             if model_config.output_capacity_factor:
                 total_cap = batch["total_capacity"].to(device)
+                total_cap = total_cap / 1000.0  # total cap is in kw, transform to Mw as target is in Mwh
                 pred = pred * total_cap
 
             loss = loss_fn(pred, target)
@@ -199,6 +200,7 @@ def train(
 
                 if model_config.output_capacity_factor:
                     total_cap = batch["total_capacity"].to(device)
+                    total_cap = total_cap / 1000.0  # total cap is in kw, transform to Mw as target is in Mwh
                     pred = pred * total_cap
 
                 loss = loss_fn(pred, target)
