@@ -10,11 +10,12 @@ FEATURES_DATA_DIR = DATA_DIR / "features"
 PLOTS_DIR = DATA_DIR / "plots"
 
 SOLAR_FEATURES_DIR = FEATURES_DATA_DIR / "solar"
-SOLAR_FEATURES_OPT1_DIR = SOLAR_FEATURES_DIR / "all_absolute"
-SOLAR_FEATURES_OPT2_DIR = SOLAR_FEATURES_DIR / "spatially_norma_caps_norm_weather"
-SOLAR_FEATURES_OPT3_DIR = SOLAR_FEATURES_DIR / "spatially_norm_caps_abs_weather"
-SOLAR_FEATURES_OPT4_DIR = SOLAR_FEATURES_DIR / "spatiotemporally_normalised_caps"
-SOLAR_FEATURES_OPT5_DIR = SOLAR_FEATURES_DIR / "spatiotemporal_caps_weighted_weather"
+SOLAR_FEATURES_OPT1_DIR = SOLAR_FEATURES_DIR / "all_abs_kw_cap"
+SOLAR_FEATURES_OPT2_DIR = SOLAR_FEATURES_DIR / "all_abs_mw_cap"
+SOLAR_FEATURES_OPT3_DIR = SOLAR_FEATURES_DIR / "spatial_norm_cap_norm_weather"
+SOLAR_FEATURES_OPT4_DIR = SOLAR_FEATURES_DIR / "spatial_norm_cap_abs_weather"
+SOLAR_FEATURES_OPT5_DIR = SOLAR_FEATURES_DIR / "spatiotemp_norm_cap"
+SOLAR_FEATURES_OPT6_DIR = SOLAR_FEATURES_DIR / "spatiotemp_cap_weighted_weather"
 
 WIND_FEATURES_DIR = FEATURES_DATA_DIR / "wind"
 
