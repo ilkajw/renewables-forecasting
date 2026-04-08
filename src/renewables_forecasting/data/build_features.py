@@ -56,9 +56,10 @@ def _broadcast_daily_capacity_to_hourly(
     -------
     np.ndarray of shape (len(hourly_times), lat, lon) as float32.
     """
-    cap_time_index = pd.DatetimeIndex(capacity_da.time.values)
-    hourly_dates_norm = hourly_times.normalize()
+    cap_time_index = pd.DatetimeIndex(capacity_da.time.values)  # Daily capacity timestamps
+    hourly_dates_norm = hourly_times.normalize()  # Strip hour from hourly timestamps to match day
 
+    # Get positions of format [0, 0, ..., 1, 1, ..., 2, ...] of hours belonging to days
     positions = cap_time_index.get_indexer(hourly_dates_norm, method="nearest")
 
     n_missing = (positions == -1).sum()
@@ -70,7 +71,7 @@ def _broadcast_daily_capacity_to_hourly(
             f"ERA5 range: {hourly_times[0]} — {hourly_times[-1]}."
         )
 
-    return capacity_da.values[positions].astype(np.float32)
+    return capacity_da.values[positions].astype(np.float32)  # Get list of repeated daily grids
 
 
 def _compute_normalization_stats(
@@ -407,7 +408,7 @@ def build_feature_dataset(
     spatiotemporal_sum = None
 
     if capacity_as_spatial_distribution:
-        # Option 2: per-hour spatial distribution
+        # Option 2 and 3: per-hour spatial distribution
         safe_total = np.where(total_capacity_hourly > 0, total_capacity_hourly, 1.0)
         capacity_channel = (
             capacity_hourly / safe_total[:, None, None]
@@ -419,7 +420,7 @@ def build_feature_dataset(
         del capacity_channel
 
     elif capacity_as_spatiotemporal_distribution:
-        # Option 3: spatiotemporal distribution — training sum only
+        # Option 4: spatiotemporal distribution — training sum only
         train_capacity = capacity_hourly[feature_indices[train_mask]]
         spatiotemporal_sum = float(train_capacity.sum())
         capacity_channel = (capacity_hourly / spatiotemporal_sum).astype(np.float32)
@@ -431,7 +432,7 @@ def build_feature_dataset(
         del capacity_channel
 
     elif capacity_weighted_weather:
-        # Option 4: capacity-weighted weather (Lindas et al. approach)
+        # Option 5: capacity-weighted weather (Lindas et al. approach)
         # Compute spatiotemporal weights from training data only
         train_capacity = capacity_hourly[feature_indices[train_mask]]
         spatiotemporal_sum = float(train_capacity.sum())
