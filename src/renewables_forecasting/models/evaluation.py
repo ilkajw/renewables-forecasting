@@ -21,10 +21,7 @@ FEATURES_DIR = SOLAR_FEATURES_OPT2_DIR
 TIME_COL = "time"
 VALUE_COL = "generation_mwh"
 
-# Path to global results file shared across all model runs
 GLOBAL_RESULTS_PATH = PROJECT_ROOT / "data" / "models" / "solar" / option / "all_results.csv"
-
-# Set to True to append this run's metrics to the global results file
 APPEND_TO_GLOBAL_RESULTS = True
 
 
@@ -36,6 +33,47 @@ def _load_model(model_dir: Path, device: torch.device) -> GenerationCNN:
     model.load_state_dict(torch.load(model_dir / "best_model.pt", map_location=device))
     model.eval()
     return model
+
+
+# ── Climatology baseline ───────────────────────────────────────────────────────
+
+def _build_climatology(features_dir: Path) -> dict:
+    """
+    Builds a climatological mean baseline from the training split.
+    For each (month, hour-of-day) combination computes the mean generation
+    across all training years.
+
+    Returns a dict mapping (month, hour) → mean_generation_MWh.
+    """
+    target_df = pd.read_csv(features_dir / "target.csv")
+    target_df[TIME_COL] = pd.to_datetime(target_df[TIME_COL])
+
+    splits_df = pd.read_csv(features_dir / "splits.csv")
+    splits_df[TIME_COL] = pd.to_datetime(splits_df[TIME_COL])
+
+    train_times = splits_df.loc[splits_df["split"] == "train", TIME_COL]
+    train_mask = target_df[TIME_COL].isin(train_times)
+    train_df = target_df[train_mask].copy()
+    train_df["month"] = train_df[TIME_COL].dt.month
+    train_df["hour"] = train_df[TIME_COL].dt.hour
+
+    climatology = (
+        train_df.groupby(["month", "hour"])[VALUE_COL].mean().to_dict()
+    )
+    return climatology
+
+
+def _apply_climatology(
+        times: np.ndarray,
+        climatology: dict,
+) -> np.ndarray:
+    """Applies climatological predictions to a set of timestamps."""
+    times_dt = pd.DatetimeIndex(times)
+    preds = np.array([
+        climatology.get((t.month, t.hour), 0.0)
+        for t in times_dt
+    ], dtype=np.float32)
+    return preds
 
 
 # ── Inference ──────────────────────────────────────────────────────────────────
@@ -62,7 +100,7 @@ def _predict(
 
             if model.config.output_capacity_factor:
                 total_cap = batch["total_capacity"].to(device)
-                total_cap = total_cap / 1000.0
+                total_cap = total_cap / 1000.0  # kW → MW, target is in MWh
                 pred = pred * total_cap
 
             all_preds.append(pred.cpu().numpy())
@@ -86,6 +124,7 @@ def _compute_metrics(
         preds: np.ndarray,
         split: str,
         model_name: str,
+        climatology: dict,
 ) -> dict:
     errors = preds - actuals
     abs_errors = np.abs(errors)
@@ -124,8 +163,6 @@ def _compute_metrics(
     skill_score = float(1 - mse / mse_mean) if mse_mean > 0 else np.nan
 
     # Skill score vs persistence (previous day same hour)
-    # For each timestamp find the value 24 hours earlier in the series.
-    # Samples within the first 24 hours have no previous day and are excluded.
     times_dt_full = pd.DatetimeIndex(times)
     time_to_idx = pd.Series(np.arange(len(actuals)), index=times_dt_full)
     persistence_errors_sq = []
@@ -147,6 +184,15 @@ def _compute_metrics(
         mse_persistence = np.nan
         skill_score_persistence = np.nan
 
+    # Skill score vs climatology (mean generation per month/hour from training)
+    clim_preds = _apply_climatology(times, climatology)
+    clim_errors = clim_preds - actuals
+    mse_climatology = float(np.mean(clim_errors ** 2))
+    skill_score_climatology = float(
+        1 - mse / mse_climatology
+    ) if mse_climatology > 0 else np.nan
+
+    # Seasonal breakdown
     times_dt = pd.DatetimeIndex(times)
     seasonal = {}
     for season, months in [("winter", [12, 1, 2]), ("spring", [3, 4, 5]),
@@ -172,6 +218,8 @@ def _compute_metrics(
         "Pearson r": correlation,
         "Skill score": skill_score,
         "Skill score (vs persistence)": skill_score_persistence,
+        "Skill score (vs climatology)": skill_score_climatology,
+        "Climatology RMSE (MWh)": float(np.sqrt(mse_climatology)),
         "Peak MAE (MWh, >p90)": peak_mae,
         "Peak RMSE (MWh, >p90)": peak_rmse,
         "Mean actual (MWh)": mean_actual,
@@ -186,19 +234,21 @@ def _print_metrics(metrics: dict) -> None:
     print(f"\n{'─' * 50}")
     print(f"  {split.upper()} SET  ({metrics['n_samples']:,} samples)")
     print(f"{'─' * 50}")
-    print(f"  MAE:              {metrics['MAE (MWh)']:>10.1f} MWh")
-    print(f"  RMSE:             {metrics['RMSE (MWh)']:>10.1f} MWh")
-    print(f"  Bias:             {metrics['Bias (MWh)']:>+10.1f} MWh  "
+    print(f"  MAE:                   {metrics['MAE (MWh)']:>10.1f} MWh")
+    print(f"  RMSE:                  {metrics['RMSE (MWh)']:>10.1f} MWh")
+    print(f"  Bias:                  {metrics['Bias (MWh)']:>+10.1f} MWh  "
           f"({'over' if metrics['Bias (MWh)'] > 0 else 'under'})")
-    print(f"  nRMSE (mean):     {metrics['nRMSE_mean (%)']:>10.2f} %")
-    print(f"  nRMSE (peak):     {metrics['nRMSE_peak (%)']:>10.2f} %")
-    print(f"  MAPE:             {metrics['MAPE (%)']:>10.2f} %")
-    print(f"  R²:               {metrics['R²']:>10.4f}")
-    print(f"  Pearson r:        {metrics['Pearson r']:>10.4f}")
-    print(f"  Skill score:      {metrics['Skill score']:>10.4f}")
-    print(f"  Skill (persist.): {metrics['Skill score (vs persistence)']:>10.4f}")
-    print(f"  Peak MAE (>p90):  {metrics['Peak MAE (MWh, >p90)']:>10.1f} MWh")
-    print(f"  Peak RMSE (>p90): {metrics['Peak RMSE (MWh, >p90)']:>10.1f} MWh")
+    print(f"  nRMSE (mean):          {metrics['nRMSE_mean (%)']:>10.2f} %")
+    print(f"  nRMSE (peak):          {metrics['nRMSE_peak (%)']:>10.2f} %")
+    print(f"  MAPE:                  {metrics['MAPE (%)']:>10.2f} %")
+    print(f"  R²:                    {metrics['R²']:>10.4f}")
+    print(f"  Pearson r:             {metrics['Pearson r']:>10.4f}")
+    print(f"  Skill score:           {metrics['Skill score']:>10.4f}")
+    print(f"  Skill (persist.):      {metrics['Skill score (vs persistence)']:>10.4f}")
+    print(f"  Skill (climatology):   {metrics['Skill score (vs climatology)']:>10.4f}")
+    print(f"  Climatology RMSE:      {metrics['Climatology RMSE (MWh)']:>10.1f} MWh")
+    print(f"  Peak MAE (>p90):       {metrics['Peak MAE (MWh, >p90)']:>10.1f} MWh")
+    print(f"  Peak RMSE (>p90):      {metrics['Peak RMSE (MWh, >p90)']:>10.1f} MWh")
     print(f"\n  Seasonal MAE:")
     for season in ("winter", "spring", "summer", "autumn"):
         key = f"MAE_{season} (MWh)"
@@ -213,23 +263,15 @@ def _append_to_global_results(
         results_path: Path,
         model_name: str,
 ) -> None:
-    """
-    Appends metrics for all splits of a model run to the global results CSV.
-    If the file does not exist it is created. If the model already has an
-    entry in the file it is overwritten — so re-running evaluation for the
-    same model updates rather than duplicates its row.
-    """
     new_df = pd.DataFrame(metrics_list)
 
     if results_path.exists():
         existing_df = pd.read_csv(results_path)
-        # Remove any existing rows for this model to avoid duplicates
         existing_df = existing_df[existing_df["model"] != model_name]
         combined = pd.concat([existing_df, new_df], ignore_index=True)
     else:
         combined = new_df
 
-    # Sort by model name and split for readability
     split_order = {"train": 0, "val": 1, "test": 2}
     combined["_split_order"] = combined["split"].map(split_order)
     combined = combined.sort_values(["model", "_split_order"]).drop(
@@ -249,30 +291,20 @@ def plot_results_table(
         splits: list[str] = ("train", "val", "test"),
         metrics: list[str] = ("MAE (MWh)", "RMSE (MWh)", "Bias (MWh)",
                               "nRMSE_mean (%)", "R²", "Skill score",
-                              "Skill score (vs persistence)"),
+                              "Skill score (vs persistence)",
+                              "Skill score (vs climatology)"),
         out_path: Path | None = None,
 ) -> None:
-    """
-    Reads the global results CSV and plots a formatted table comparing all
-    models across the selected splits and metrics.
-
-    Parameters
-    ----------
-    results_path:
-        Path to the global results CSV produced by the evaluation script.
-    splits:
-        Which splits to include. Default: val and test.
-    metrics:
-        Which metrics to show in the table. Default: key summary metrics.
-    out_path:
-        Optional path to save the table as a PNG. If None, shows interactively.
-    """
     df = pd.read_csv(results_path)
     df = df[df["split"].isin(splits)]
 
-    # Build a multi-index table: rows = models, columns = (split, metric)
     rows = []
-    model_names = sorted(df["model"].unique())
+    import re
+    def _model_sort_key(name):
+        # Extract trailing number for natural sort e.g. solar_v10 → 10
+        m = re.search(r'(\d+)$', name)
+        return int(m.group(1)) if m else name
+    model_names = sorted(df["model"].unique(), key=_model_sort_key)
 
     for model in model_names:
         row = {"model": model}
@@ -288,7 +320,6 @@ def plot_results_table(
 
     table_df = pd.DataFrame(rows).set_index("model")
 
-    # Format values for display
     def _fmt(val, metric):
         if pd.isna(val):
             return "—"
@@ -306,7 +337,6 @@ def plot_results_table(
             row_vals.append(_fmt(table_df.loc[model, col], metric))
         display_data.append(row_vals)
 
-    # Shorten metric names for readability in column headers
     metric_short = {
         "MAE (MWh)": "MAE",
         "RMSE (MWh)": "RMSE",
@@ -318,6 +348,7 @@ def plot_results_table(
         "Pearson r": "r",
         "Skill score": "Skill",
         "Skill score (vs persistence)": "Skill/pers",
+        "Skill score (vs climatology)": "Skill/clim",
         "Peak MAE (MWh, >p90)": "PkMAE",
         "Peak RMSE (MWh, >p90)": "PkRMSE",
     }
@@ -343,24 +374,18 @@ def plot_results_table(
     table.set_fontsize(10)
     table.auto_set_column_width(col=list(range(len(col_labels) + 1)))
 
-    # Increase row height for all cells
-    for (row, col), cell in table.get_celld().items():
-        cell.set_height(0.12)
-    # Increase row height so header text is not clipped
     for (row, col), cell in table.get_celld().items():
         if row == 0:
             cell.set_height(0.12)
         else:
             cell.set_height(0.08)
 
-    # Metrics where lower is better — all others assumed higher is better
     lower_is_better = {
         "MAE (MWh)", "RMSE (MWh)", "MSE (MWh²)", "nRMSE_mean (%)",
         "nRMSE_peak (%)", "MAPE (%)", "Peak MAE (MWh, >p90)",
         "Peak RMSE (MWh, >p90)",
     }
 
-    # Find best and worst row index per column
     best_cells = set()
     worst_cells = set()
 
@@ -370,7 +395,12 @@ def plot_results_table(
         float_vals = col_vals.astype(float)
         if np.isnan(float_vals).all() or (~np.isnan(float_vals)).sum() < 2:
             continue
-        if metric in lower_is_better:
+        if "Bias" in metric:
+            # Closest to zero is best for bias
+            abs_vals = np.abs(float_vals)
+            best_row = int(np.nanargmin(abs_vals)) + 1
+            worst_row = int(np.nanargmax(abs_vals)) + 1
+        elif metric in lower_is_better:
             best_row = int(np.nanargmin(float_vals)) + 1
             worst_row = int(np.nanargmax(float_vals)) + 1
         else:
@@ -379,7 +409,6 @@ def plot_results_table(
         best_cells.add((best_row, col_idx))
         worst_cells.add((worst_row, col_idx))
 
-    # Style all cells
     for (row, col), cell in table.get_celld().items():
         if row == 0 or col == -1:
             cell.set_facecolor("#2c3e50")
@@ -477,10 +506,8 @@ def _plot_week(times, actuals, preds, split, out_dir, season):
     month = 7 if season == "summer" else 1
     label = "Summer (July)" if season == "summer" else "Winter (January)"
 
-    month_mask = times_dt.month == month  # Create month mask for July or January
-
+    month_mask = times_dt.month == month
     if not month_mask.any():
-        # Mask is all-zero
         print(f"  No {season} data found in {split} set — skipping")
         return
 
@@ -517,17 +544,22 @@ def _plot_week(times, actuals, preds, split, out_dir, season):
 # ── Main ───────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    for num in range(first_model, last_model+1):
+    # Build climatology once from training data — shared across all models
+    print("Building climatological baseline from training data ...")
+    climatology = _build_climatology(FEATURES_DIR)
+    print(f"  Climatology built for {len(climatology)} (month, hour) combinations")
+
+    for num in range(first_model, last_model + 1):
         MODEL_DIR = PROJECT_ROOT / "data" / "models" / "solar" / option / f"solar_v{num}"
         if not MODEL_DIR.exists():
             print(f"Skipping model solar_v{num}. No directory found.")
             continue
 
         OUT_DIR = MODEL_DIR / "eval"
-        model_name = MODEL_DIR.name  # e.g. "solar_v2"
+        model_name = MODEL_DIR.name
 
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        print(f"Device:     {device}")
+        print(f"\nDevice:     {device}")
         print(f"Model:      {MODEL_DIR}")
         print(f"Model name: {model_name}")
 
@@ -542,11 +574,12 @@ if __name__ == "__main__":
             print(f"\nPredicting {split} set ...")
             times, actuals, preds = _predict(model, FEATURES_DIR, split, device)
 
-            metrics = _compute_metrics(times, actuals, preds, split, model_name)
+            metrics = _compute_metrics(
+                times, actuals, preds, split, model_name, climatology
+            )
             _print_metrics(metrics)
             all_metrics.append(metrics)
 
-            # Save per-split predictions CSV
             errors = preds - actuals
             pred_df = pd.DataFrame({
                 TIME_COL: times,
@@ -558,24 +591,20 @@ if __name__ == "__main__":
             pred_df.to_csv(OUT_DIR / f"predictions_{split}.csv", index=False)
             print(f"  Predictions saved to: {OUT_DIR / f'predictions_{split}.csv'}")
 
-            # Plots for val and test only
             if split != "train":
                 _plot_full_period(times, actuals, preds, metrics, OUT_DIR)
                 _plot_scatter(actuals, preds, metrics, OUT_DIR)
                 _plot_week(times, actuals, preds, split, OUT_DIR, "summer")
                 _plot_week(times, actuals, preds, split, OUT_DIR, "winter")
 
-        # Save per-model metrics CSV
         metrics_df = pd.DataFrame(all_metrics)
         metrics_path = OUT_DIR / "metrics_all_splits.csv"
         metrics_df.to_csv(metrics_path, index=False)
         print(f"\nModel metrics saved to: {metrics_path}")
 
-        # Optionally append to global results file
         if APPEND_TO_GLOBAL_RESULTS:
             _append_to_global_results(all_metrics, GLOBAL_RESULTS_PATH, model_name)
 
-        # Plot comparison table if global results file exists
         if GLOBAL_RESULTS_PATH.exists():
             plot_results_table(
                 results_path=GLOBAL_RESULTS_PATH,

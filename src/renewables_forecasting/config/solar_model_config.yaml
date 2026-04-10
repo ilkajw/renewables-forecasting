@@ -19,14 +19,28 @@ model:
   dropout: 0.2
 
   # ── Output mode ──────────────────────────────────────────────────────────────
-  # false: unbounded scalar MWh output (use with option 1 capacity channel)
-  # true:  sigmoid output in [0,1] capacity factor (use with option 2 capacity channel)
-  #        multiply by total_capacity in training loop to reconstruct MWh
+  # false: unbounded scalar MWh output (options 1, 2, 4, 5)
+  # true:  sigmoid output in [0,1] capacity factor (options 3, 4)
+  #        multiply by total_capacity / 1000 in training loop to reconstruct MWh
   output_capacity_factor: false
 
 training:
   learning_rate: 1.0e-3
   batch_size: 32
-  max_epochs: 150
+  max_epochs: 200
   optimizer: adam
-  weight_decay:  0.0 # 1.0e-4  # L2 regularisation — set to 0.0 to disable
+  weight_decay: 0.0
+  early_stopping_patience: 30
+
+  # ── Loss weighting ────────────────────────────────────────────────────────────
+  # Upweights high-generation hours to improve peak accuracy.
+  # Strategies:
+  #   none                 — standard unweighted MSE
+  #   proportional         — weight = target / mean_train_target
+  #   proportional_squared — weight = target² / mean(target²), more aggressive
+  #   clipped              — proportional but capped at loss_weight_max
+  #   threshold            — binary: above percentile gets multiplier, rest get 1.0
+  loss_weighting: "none"
+  loss_weight_max: 5.0                    # cap for clipped strategy
+  loss_weight_threshold_percentile: 75.0  # percentile for threshold strategy
+  loss_weight_threshold_multiplier: 3.0   # multiplier for threshold strategy

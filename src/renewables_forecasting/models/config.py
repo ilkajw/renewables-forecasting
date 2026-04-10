@@ -56,7 +56,29 @@ class TrainingConfig:
     batch_size: int
     max_epochs: int
     optimizer: str
-    weight_decay: float  # L2 regularisation — 0.0 disables it
+    weight_decay: float           # L2 regularisation — 0.0 disables it
+    early_stopping_patience: int  # epochs without val improvement before stopping
+
+    # ── Loss weighting ────────────────────────────────────────────────────────
+    # Controls how much high-generation hours are emphasised in the loss.
+    # Motivated by the fact that generation grows with installed capacity over
+    # time — accurate prediction at high-generation hours matters more.
+    #
+    # Strategies:
+    #   "none"                — standard unweighted MSE (default)
+    #   "proportional"        — weight = target / mean_train_target
+    #                           Hours with generation twice the mean get 2x weight.
+    #                           Zero-generation hours get zero weight.
+    #   "proportional_squared"— weight = target² / mean(target²)
+    #                           More aggressive — really emphasises peaks.
+    #   "clipped"             — proportional but capped at loss_weight_max.
+    #                           Prevents a few extreme peaks from dominating.
+    #   "threshold"           — binary: hours above loss_weight_threshold_percentile
+    #                           get loss_weight_threshold_multiplier, others get 1.0.
+    loss_weighting: str           # none | proportional | proportional_squared | clipped | threshold
+    loss_weight_max: float        # max weight cap for "clipped" strategy
+    loss_weight_threshold_percentile: float   # percentile threshold for "threshold" strategy
+    loss_weight_threshold_multiplier: float   # multiplier for hours above threshold
 
     @classmethod
     def from_yaml(cls, path: Path) -> "TrainingConfig":
@@ -69,4 +91,9 @@ class TrainingConfig:
             max_epochs=t["max_epochs"],
             optimizer=t["optimizer"],
             weight_decay=t.get("weight_decay", 0.0),
+            early_stopping_patience=t.get("early_stopping_patience", 10),
+            loss_weighting=t.get("loss_weighting", "none"),
+            loss_weight_max=t.get("loss_weight_max", 5.0),
+            loss_weight_threshold_percentile=t.get("loss_weight_threshold_percentile", 75.0),
+            loss_weight_threshold_multiplier=t.get("loss_weight_threshold_multiplier", 3.0),
         )
