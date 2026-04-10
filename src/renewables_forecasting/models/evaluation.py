@@ -6,7 +6,7 @@ import matplotlib.dates as mdates
 from pathlib import Path
 from torch.utils.data import DataLoader
 
-from renewables_forecasting.config.paths import SOLAR_FEATURES_DIR, PROJECT_ROOT
+from renewables_forecasting.config.paths import SOLAR_FEATURES_OPT2_DIR, PROJECT_ROOT
 from renewables_forecasting.models.config import ModelConfig
 from renewables_forecasting.models.cnn import GenerationCNN
 from renewables_forecasting.models.dataset import GenerationDataset
@@ -14,13 +14,15 @@ from renewables_forecasting.models.dataset import GenerationDataset
 
 # ── Config ─────────────────────────────────────────────────────────────────────
 
-
-FEATURES_DIR = SOLAR_FEATURES_DIR
+option = "opt2"
+first_model = 1
+last_model = 1
+FEATURES_DIR = SOLAR_FEATURES_OPT2_DIR
 TIME_COL = "time"
 VALUE_COL = "generation_mwh"
 
 # Path to global results file shared across all model runs
-GLOBAL_RESULTS_PATH = PROJECT_ROOT / "data" / "models" / "solar" / "all_results.csv"
+GLOBAL_RESULTS_PATH = PROJECT_ROOT / "data" / "models" / "solar" / option / "all_results.csv"
 
 # Set to True to append this run's metrics to the global results file
 APPEND_TO_GLOBAL_RESULTS = True
@@ -60,6 +62,7 @@ def _predict(
 
             if model.config.output_capacity_factor:
                 total_cap = batch["total_capacity"].to(device)
+                total_cap = total_cap / 1000.0
                 pred = pred * total_cap
 
             all_preds.append(pred.cpu().numpy())
@@ -474,8 +477,10 @@ def _plot_week(times, actuals, preds, split, out_dir, season):
     month = 7 if season == "summer" else 1
     label = "Summer (July)" if season == "summer" else "Winter (January)"
 
-    month_mask = times_dt.month == month
+    month_mask = times_dt.month == month  # Create month mask for July or January
+
     if not month_mask.any():
+        # Mask is all-zero
         print(f"  No {season} data found in {split} set — skipping")
         return
 
@@ -512,8 +517,8 @@ def _plot_week(times, actuals, preds, split, out_dir, season):
 # ── Main ───────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    for num in range(6, 10):
-        MODEL_DIR = PROJECT_ROOT / "data" / "models" / "solar" / f"solar_v{num}"
+    for num in range(first_model, last_model+1):
+        MODEL_DIR = PROJECT_ROOT / "data" / "models" / "solar" / option / f"solar_v{num}"
         if not MODEL_DIR.exists():
             print(f"Skipping model solar_v{num}. No directory found.")
             continue
